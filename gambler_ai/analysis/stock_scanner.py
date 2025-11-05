@@ -46,8 +46,8 @@ class StockScanner:
         self,
         scanner_type: ScannerType = ScannerType.BEST_SETUPS,
         max_stocks: int = 5,
-        min_volume_ratio: float = 1.5,
-        min_price_change: float = 1.0,
+        min_volume_ratio: float = 1.2,  # Lowered from 1.5 to 1.2 (20% above average)
+        min_price_change: float = 0.5,  # Lowered from 1.0% to 0.5%
     ):
         """
         Initialize stock scanner.
@@ -247,21 +247,34 @@ class StockScanner:
         return (score, f"relative_strength: {relative_strength:+.1%} vs SPY")
 
     def _score_gap(self, df: pd.DataFrame, setups: List) -> Tuple[float, str]:
-        """Score based on gap at market open."""
-        if len(df) < 2:
+        """
+        Score based on significant price gaps.
+
+        For intraday data, looks for gaps >0.5% between any consecutive bars
+        (simulates overnight gaps).
+        """
+        if len(df) < 20:
             return (0, "insufficient_data")
 
-        # Check if there's a gap (today's open vs yesterday's close)
-        current_open = df['open'].iloc[-1]
-        previous_close = df['close'].iloc[-2]
+        # Look for any significant gap in last 20 bars
+        # Gap = difference between open and previous close
+        max_gap = 0
+        for i in range(-20, -1):
+            try:
+                current_open = df['open'].iloc[i]
+                previous_close = df['close'].iloc[i-1]
+                gap_pct = abs((current_open - previous_close) / previous_close * 100)
 
-        gap_pct = (current_open - previous_close) / previous_close * 100
+                if gap_pct > abs(max_gap):
+                    max_gap = gap_pct if (current_open > previous_close) else -gap_pct
+            except:
+                continue
 
-        if abs(gap_pct) < 1.0:  # Minimum 1% gap
+        if abs(max_gap) < 0.3:  # Minimum 0.3% gap (lowered for intraday)
             return (0, "no_significant_gap")
 
-        score = abs(gap_pct) * len(setups) * 10
-        return (score, f"gap: {gap_pct:+.1f}% at open")
+        score = abs(max_gap) * len(setups) * 10
+        return (score, f"gap: {max_gap:+.1f}% detected")
 
     def _score_best_setups(
         self,
@@ -334,18 +347,31 @@ class StockScanner:
 
         return (end_price - start_price) / start_price * 100
 
-    def _calculate_volume_ratio(self, df: pd.DataFrame, periods: int = 20) -> float:
-        """Calculate current volume vs average."""
-        if len(df) < periods:
+    def _calculate_volume_ratio(self, df: pd.DataFrame, lookback_recent: int = 20, lookback_baseline: int = 100) -> float:
+        """
+        Calculate PEAK volume in recent period vs baseline average.
+
+        Args:
+            lookback_recent: Recent period to find max volume (default: 20 bars)
+            lookback_baseline: Baseline period for average (default: 100 bars)
+
+        Returns:
+            Ratio of peak recent volume to baseline average
+        """
+        total_needed = lookback_baseline + lookback_recent
+        if len(df) < total_needed:
             return 1.0
 
-        avg_volume = df['volume'].iloc[-periods:-1].mean()
-        current_volume = df['volume'].iloc[-1]
+        # Baseline: Average volume from older bars
+        baseline_volume = df['volume'].iloc[-(lookback_baseline + lookback_recent):-lookback_recent].mean()
 
-        if avg_volume == 0:
+        # Recent: MAXIMUM volume in recent bars (catches spikes)
+        recent_max_volume = df['volume'].iloc[-lookback_recent:].max()
+
+        if baseline_volume == 0:
             return 1.0
 
-        return current_volume / avg_volume
+        return recent_max_volume / baseline_volume
 
     def print_scan_results(self, results: List[ScanResult]):
         """Print scan results in a formatted table."""
