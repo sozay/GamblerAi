@@ -19,24 +19,40 @@ logger = get_logger(__name__)
 class MomentumDetector:
     """Detect and analyze momentum events in stock price data."""
 
-    def __init__(self):
-        """Initialize the momentum detector."""
-        self.db = get_timeseries_db()
-        self.config = get_config()
+    def __init__(self, use_db: bool = True):
+        """
+        Initialize the momentum detector.
 
-        # Load configuration
-        self.min_price_change_pct = self.config.get(
-            "analysis.momentum_detection.min_price_change_pct", 2.0
-        )
-        self.min_volume_ratio = self.config.get(
-            "analysis.momentum_detection.min_volume_ratio", 2.0
-        )
-        self.window_minutes = self.config.get(
-            "analysis.momentum_detection.window_minutes", 5
-        )
-        self.lookback_periods = self.config.get(
-            "analysis.momentum_detection.lookback_periods", 20
-        )
+        Args:
+            use_db: Whether to initialize database connection. Set to False for backtesting.
+        """
+        self.use_db = use_db
+
+        if use_db:
+            self.db = get_timeseries_db()
+            self.config = get_config()
+
+            # Load configuration
+            self.min_price_change_pct = self.config.get(
+                "analysis.momentum_detection.min_price_change_pct", 2.0
+            )
+            self.min_volume_ratio = self.config.get(
+                "analysis.momentum_detection.min_volume_ratio", 2.0
+            )
+            self.window_minutes = self.config.get(
+                "analysis.momentum_detection.window_minutes", 5
+            )
+            self.lookback_periods = self.config.get(
+                "analysis.momentum_detection.lookback_periods", 20
+            )
+        else:
+            # Use default values for backtesting
+            self.db = None
+            self.config = None
+            self.min_price_change_pct = 2.0
+            self.min_volume_ratio = 2.0
+            self.window_minutes = 5
+            self.lookback_periods = 20
 
     def detect_events(
         self,
@@ -384,3 +400,61 @@ class MomentumDetector:
         )
 
         return stats
+
+    def detect_setups(self, df: pd.DataFrame) -> List[Dict]:
+        """
+        Detect trading setups for backtesting (DataFrame-based, no database required).
+
+        This method is compatible with the backtesting framework.
+
+        Args:
+            df: DataFrame with columns: timestamp, open, high, low, close, volume
+
+        Returns:
+            List of setup dictionaries with entry_time, entry_price, direction, stop_loss, target
+        """
+        # Calculate indicators
+        df = self._calculate_indicators(df.copy())
+
+        setups = []
+
+        for i in range(self.window_minutes, len(df)):
+            row = df.iloc[i]
+
+            # Skip if we don't have enough data
+            if pd.isna(row.get("avg_volume")) or pd.isna(row.get("price_change_pct")):
+                continue
+
+            abs_price_change = abs(row["price_change_pct"])
+
+            # Check if this qualifies as a momentum event
+            if (
+                abs_price_change >= self.min_price_change_pct
+                and row["volume_ratio"] >= self.min_volume_ratio
+            ):
+                # Determine direction
+                direction = "LONG" if row["price_change_pct"] > 0 else "SHORT"
+
+                entry_price = float(row["close"])
+
+                # Set stop loss at 1% from entry
+                if direction == "LONG":
+                    stop_loss = entry_price * 0.99
+                    target = entry_price * 1.03  # 3% target
+                else:
+                    stop_loss = entry_price * 1.01
+                    target = entry_price * 0.97  # 3% target
+
+                setup = {
+                    'entry_time': row['timestamp'],
+                    'entry_price': entry_price,
+                    'direction': direction,
+                    'stop_loss': stop_loss,
+                    'target': target,
+                    'signal_strength': min(abs_price_change / 5.0, 1.0),  # Normalize to 0-1
+                    'setup_type': 'Momentum Continuation'
+                }
+
+                setups.append(setup)
+
+        return setups

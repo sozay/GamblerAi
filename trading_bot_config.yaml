@@ -1,0 +1,92 @@
+# Trading Bot Configuration
+
+# Alpaca API Credentials
+alpaca:
+  api_key: ${ALPACA_API_KEY:PKJUPGKDCCIMZKPDXUFXHM3E4D}
+  api_secret: ${ALPACA_API_SECRET:CcXV59Li9bQC4K3yfmNXVsZ3GYwrEFrGfECGbRjaVb3H}
+  paper_trading: true
+  data_feed: iex  # 'iex' or 'sip'
+
+# Trading Parameters
+trading:
+  # Symbols to trade
+  symbols:
+    - SPY    # S&P 500 ETF
+    - QQQ    # NASDAQ 100 ETF
+    - AAPL   # Apple
+    - MSFT   # Microsoft
+    - TSLA   # Tesla
+
+  # Position Sizing
+  max_position_size: 10000.0  # Maximum $ per position
+  max_total_exposure: 50000.0  # Maximum total portfolio exposure
+  max_positions: 5             # Maximum concurrent positions
+
+  # Risk Management
+  risk_per_trade: 0.02        # Risk 2% of capital per trade
+  stop_loss_pct: 0.03         # 3% stop loss
+  take_profit_pct: 0.06       # 6% take profit (2:1 risk:reward)
+  trailing_stop_pct: 0.05     # 5% trailing stop (optional)
+
+  # Strategy Selection
+  use_adaptive_strategy: true
+  use_volatility_filter: true
+  require_regime_confirmation: true
+
+  # Time Filters
+  trading_hours_only: true    # Only trade during market hours
+  avoid_first_15min: true     # Skip first 15 minutes
+  avoid_last_15min: true      # Skip last 15 minutes
+
+# Strategy-Specific Parameters
+strategies:
+  momentum:
+    enabled: true
+    min_momentum_threshold: 2.0
+    volume_ratio_threshold: 1.5
+
+  mean_reversion:
+    enabled: true
+    oversold_threshold: 30
+    overbought_threshold: 70
+
+  volatility_breakout:
+    enabled: true
+    volatility_threshold: 1.5
+
+  multi_timeframe:
+    enabled: true
+    timeframes: ["5min", "15min", "1hour"]
+
+  smart_money:
+    enabled: true
+    volume_spike_threshold: 2.0
+
+# Regime Detection
+regime_detection:
+  ema_period: 200
+  bull_threshold: 1.02        # 2% above EMA
+  bear_threshold: 0.98        # 2% below EMA
+  use_adx: false
+  high_volatility_threshold: 0.015  # 1.5% daily volatility
+
+# Logging
+logging:
+  level: INFO
+  log_to_file: true
+  log_file: logs/trading_bot.log
+
+# Notifications (optional)
+notifications:
+  email_enabled: false
+  email_address: your-email@example.com
+  telegram_enabled: false
+  telegram_token: your-telegram-token
+  telegram_chat_id: your-chat-id
+
+# Safety Features
+safety:
+  max_daily_loss: 0.05         # Stop trading if lose 5% in one day
+  max_daily_trades: 20         # Maximum trades per day
+  require_manual_approval: false  # Require manual approval before orders
+  dry_run: false               # Paper trade without actual orders

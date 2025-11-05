@@ -407,5 +407,116 @@ def config():
         sys.exit(1)
 
 
+@cli.command()
+@click.option(
+    "--symbol",
+    "-s",
+    required=True,
+    help="Stock symbol to backtest (e.g., AAPL)",
+)
+@click.option(
+    "--start",
+    required=True,
+    help="Start date (YYYY-MM-DD)",
+)
+@click.option(
+    "--end",
+    required=True,
+    help="End date (YYYY-MM-DD)",
+)
+@click.option(
+    "--timeframe",
+    "-t",
+    default="5min",
+    help="Timeframe (default: 5min)",
+)
+@click.option(
+    "--capital",
+    "-c",
+    default=100000,
+    type=float,
+    help="Initial capital (default: 100000)",
+)
+@click.option(
+    "--risk",
+    "-r",
+    default=0.01,
+    type=float,
+    help="Risk per trade as fraction (default: 0.01 = 1%)",
+)
+@click.option(
+    "--output",
+    "-o",
+    help="Output file for detailed results (JSON)",
+)
+def backtest(symbol, start, end, timeframe, capital, risk, output):
+    """
+    Run backtest simulation on historical data.
+
+    Example:
+        gambler-cli backtest -s AAPL --start 2024-01-01 --end 2024-12-31
+    """
+    try:
+        from gambler_ai.backtesting import BacktestEngine
+        import json
+
+        # Parse dates
+        start_date = datetime.strptime(start, "%Y-%m-%d")
+        end_date = datetime.strptime(end, "%Y-%m-%d")
+
+        click.echo(f"\n{'='*60}")
+        click.echo(f"BACKTESTING: {symbol}")
+        click.echo(f"Period: {start} to {end}")
+        click.echo(f"Timeframe: {timeframe}")
+        click.echo(f"Initial Capital: ${capital:,.2f}")
+        click.echo(f"Risk per Trade: {risk*100:.1f}%")
+        click.echo(f"{'='*60}\n")
+
+        # Initialize backtest engine
+        engine = BacktestEngine(
+            initial_capital=capital,
+            risk_per_trade=risk,
+            max_concurrent_trades=3,
+        )
+
+        # Run backtest
+        click.echo("Running backtest...")
+        results = engine.run_momentum_backtest(
+            symbol=symbol,
+            start_date=start_date,
+            end_date=end_date,
+            timeframe=timeframe,
+        )
+
+        # Display report
+        click.echo(results["report"])
+
+        # Save detailed results if output specified
+        if output:
+            output_path = Path(output)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+
+            with open(output_path, 'w') as f:
+                json.dump(results, f, indent=2)
+
+            click.echo(f"\n✓ Detailed results saved to: {output}")
+
+        # Summary
+        metrics = results["metrics"]
+        click.echo(f"\n{'='*60}")
+        click.echo(f"QUICK SUMMARY:")
+        click.echo(f"  Total Return: {metrics['total_return_pct']:.2f}%")
+        click.echo(f"  Win Rate: {metrics['win_rate_pct']:.1f}%")
+        click.echo(f"  Profit Factor: {metrics['profit_factor']:.2f}")
+        click.echo(f"  Total Trades: {metrics['total_trades']}")
+        click.echo(f"  Performance Score: {metrics['performance_score']}/100")
+        click.echo(f"{'='*60}")
+
+    except Exception as e:
+        click.echo(f"✗ Error: {e}", err=True)
+        logger.error(f"Backtest error: {e}", exc_info=True)
+        sys.exit(1)
+
+
 if __name__ == "__main__":
     cli()

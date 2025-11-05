@@ -31,6 +31,33 @@ data_sources:
     api_key: ${ALPHA_VANTAGE_KEY:}
     rate_limit: 500  # requests per day
 
+  alpaca:
+    enabled: true
+    api_key: ${ALPACA_API_KEY:PKJUPGKDCCIMZKPDXUFXHM3E4D}
+    api_secret: ${ALPACA_API_SECRET:CcXV59Li9bQC4K3yfmNXVsZ3GYwrEFrGfECGbRjaVb3H}
+    base_url: ${ALPACA_BASE_URL:https://paper-api.alpaca.markets}
+    data_feed: ${ALPACA_DATA_FEED:iex}  # 'iex' for free tier, 'sip' for unlimited
+    paper_trading: ${ALPACA_PAPER_TRADING:true}
+
+    # Real-time streaming configuration
+    streaming:
+      enabled: true
+      websocket:
+        auto_reconnect: true
+        ping_interval: 30
+        ping_timeout: 10
+
+      sse:
+        enabled: true
+        auto_reconnect: true
+        retry_delay: 2
+        max_retry_delay: 60
+
+      # Symbols to stream (can be overridden)
+      default_symbols:
+        - SPY
+        - QQQ
+
 analysis:
   # Momentum detection parameters
   momentum_detection:
