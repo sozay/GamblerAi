@@ -33,6 +33,8 @@ Available Analyses:
   2. Timeframe Comparison  - Test all strategies across different bar sizes
   3. Combined Analysis     - Run both monthly and timeframe analyses
   4. Quick Summary         - Fast overview of all strategies
+  5. Adaptive Strategy     - Test adaptive regime-based strategy selection
+  6. Bear Market Test      - Test strategies in 2022-style bear market
 
 """
     print(banner)
@@ -103,6 +105,34 @@ def run_combined_analysis():
     run_timeframe_analysis()
 
 
+def run_adaptive_analysis():
+    """Run adaptive strategy comparison"""
+    print("\n" + "="*80)
+    print("RUNNING ADAPTIVE STRATEGY ANALYSIS")
+    print("="*80 + "\n")
+
+    print("This will test adaptive regime-based strategy selection")
+    print("Compares static strategies vs auto-switching adaptive approach")
+    print("Estimated time: 2-3 minutes\n")
+
+    import subprocess
+    result = subprocess.run(['python', 'backtest_adaptive.py'], capture_output=False)
+
+
+def run_bear_market_analysis():
+    """Run bear market test"""
+    print("\n" + "="*80)
+    print("RUNNING BEAR MARKET ANALYSIS")
+    print("="*80 + "\n")
+
+    print("This will test all strategies in 2022-style bear market")
+    print("Market decline: -40% over 12 months")
+    print("Estimated time: 2-3 minutes\n")
+
+    import subprocess
+    result = subprocess.run(['python', 'backtest_bear_market.py'], capture_output=False)
+
+
 def print_menu():
     """Interactive menu"""
     print("\nSelect analysis type:")
@@ -110,7 +140,9 @@ def print_menu():
     print("  2 - Timeframe Comparison")
     print("  3 - Combined Analysis (Monthly + Timeframe)")
     print("  4 - Quick Summary")
-    print("  5 - Exit")
+    print("  5 - Adaptive Strategy Test")
+    print("  6 - Bear Market Test")
+    print("  7 - Exit")
     print()
 
 
@@ -136,6 +168,10 @@ Examples:
                         help='Run combined analysis')
     parser.add_argument('--quick', action='store_true',
                         help='Run quick summary')
+    parser.add_argument('--adaptive', action='store_true',
+                        help='Run adaptive strategy test')
+    parser.add_argument('--bear', action='store_true',
+                        help='Run bear market test')
 
     args = parser.parse_args()
 
@@ -154,13 +190,19 @@ Examples:
     elif args.quick:
         run_quick_summary()
         return
+    elif args.adaptive:
+        run_adaptive_analysis()
+        return
+    elif args.bear:
+        run_bear_market_analysis()
+        return
 
     # Interactive mode
     while True:
         print_menu()
 
         try:
-            choice = input("Enter choice (1-5): ").strip()
+            choice = input("Enter choice (1-7): ").strip()
 
             if choice == '1':
                 run_monthly_analysis()
@@ -171,10 +213,14 @@ Examples:
             elif choice == '4':
                 run_quick_summary()
             elif choice == '5':
+                run_adaptive_analysis()
+            elif choice == '6':
+                run_bear_market_analysis()
+            elif choice == '7':
                 print("\n👋 Goodbye!\n")
                 break
             else:
-                print("\n❌ Invalid choice. Please enter 1-5.\n")
+                print("\n❌ Invalid choice. Please enter 1-7.\n")
 
             print("\n" + "="*80)
             print("Analysis complete!")
