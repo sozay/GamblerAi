@@ -134,20 +134,56 @@ class MeanReversionDetector:
         return df
 
     def _is_long_setup(self, row: pd.Series) -> bool:
-        """Check if row represents a LONG setup."""
-        return (
-            row['close'] <= row['bb_lower'] and
-            row['rsi'] < self.rsi_oversold and
-            row['volume_ratio'] > self.volume_multiplier
-        )
+        """
+        Check if row represents a LONG setup.
+        Requires at least 2 out of 3 conditions for more flexibility.
+        """
+        conditions_met = 0
+
+        # Condition 1: Price at/below lower BB
+        if row['close'] <= row['bb_lower']:
+            conditions_met += 1
+
+        # Condition 2: RSI oversold
+        if row['rsi'] < self.rsi_oversold:
+            conditions_met += 1
+
+        # Condition 3: Volume spike
+        if row['volume_ratio'] > self.volume_multiplier:
+            conditions_met += 1
+
+        # Also accept if price is very close to BB (within 0.5%) and one other condition
+        if conditions_met < 2 and row['close'] <= row['bb_lower'] * 1.005:
+            if row['rsi'] < self.rsi_oversold * 1.2 or row['volume_ratio'] > self.volume_multiplier * 0.7:
+                conditions_met = 2
+
+        return conditions_met >= 2
 
     def _is_short_setup(self, row: pd.Series) -> bool:
-        """Check if row represents a SHORT setup."""
-        return (
-            row['close'] >= row['bb_upper'] and
-            row['rsi'] > self.rsi_overbought and
-            row['volume_ratio'] > self.volume_multiplier
-        )
+        """
+        Check if row represents a SHORT setup.
+        Requires at least 2 out of 3 conditions for more flexibility.
+        """
+        conditions_met = 0
+
+        # Condition 1: Price at/above upper BB
+        if row['close'] >= row['bb_upper']:
+            conditions_met += 1
+
+        # Condition 2: RSI overbought
+        if row['rsi'] > self.rsi_overbought:
+            conditions_met += 1
+
+        # Condition 3: Volume spike
+        if row['volume_ratio'] > self.volume_multiplier:
+            conditions_met += 1
+
+        # Also accept if price is very close to BB (within 0.5%) and one other condition
+        if conditions_met < 2 and row['close'] >= row['bb_upper'] * 0.995:
+            if row['rsi'] > self.rsi_overbought * 0.8 or row['volume_ratio'] > self.volume_multiplier * 0.7:
+                conditions_met = 2
+
+        return conditions_met >= 2
 
     def calculate_target_distance(self, entry_price: float, target: float) -> float:
         """Calculate distance to target in percentage."""

@@ -158,10 +158,10 @@ class SmartMoneyDetector:
 
     def _detect_vwap_reclaim(self, df: pd.DataFrame) -> List[Dict]:
         """
-        Detect VWAP reclaim patterns.
+        Detect VWAP reclaim and rejection patterns.
 
-        When price breaks below VWAP then quickly reclaims it,
-        often indicates institutional support (stop hunt + reversal).
+        LONG: Price breaks below VWAP then quickly reclaims it (support)
+        SHORT: Price breaks above VWAP then gets rejected (resistance)
         """
         setups = []
 
@@ -169,10 +169,8 @@ class SmartMoneyDetector:
             current = df.iloc[i]
             prev_bars = df.iloc[i-5:i]
 
-            # Check if previous bars were below VWAP
+            # LONG Setup: VWAP Reclaim
             was_below_vwap = (prev_bars['close'] < prev_bars['vwap']).any()
-
-            # Check if current bar reclaims VWAP
             reclaims_vwap = (
                 current['close'] > current['vwap'] and
                 current['low'] < current['vwap']  # Tested and reclaimed
@@ -191,31 +189,51 @@ class SmartMoneyDetector:
                 }
                 setups.append(setup)
 
+            # SHORT Setup: VWAP Rejection
+            was_above_vwap = (prev_bars['close'] > prev_bars['vwap']).any()
+            rejects_at_vwap = (
+                current['close'] < current['vwap'] and
+                current['high'] > current['vwap']  # Tested and rejected
+            )
+
+            if was_above_vwap and rejects_at_vwap:
+                setup = {
+                    'direction': 'SHORT',
+                    'pattern': 'vwap_rejection',
+                    'timestamp': current.get('timestamp', i),
+                    'entry_price': float(current['close']),
+                    'vwap': float(current['vwap']),
+                    'volume_ratio': float(current['volume_ratio']),
+                    'target': float(current['close'] * 0.975),  # 2.5% target
+                    'stop_loss': float(current['high'] * 1.005),  # Above high
+                }
+                setups.append(setup)
+
         return setups
 
     def _detect_level_defense(self, df: pd.DataFrame) -> List[Dict]:
         """
-        Detect level defense patterns (Wyckoff Spring).
+        Detect level defense and distribution patterns.
 
-        Multiple tests of support with decreasing spread indicates
-        accumulation at a level.
+        LONG: Support defense (Wyckoff Spring) - accumulation at support
+        SHORT: Resistance distribution (Wyckoff Upthrust) - distribution at resistance
         """
         setups = []
 
-        # Look for support levels being tested multiple times
+        # Look for support/resistance levels being tested multiple times
         for i in range(20, len(df) - 5):
             window = df.iloc[i-20:i]
 
-            # Find potential support level (lowest low in window)
+            # LONG Setup: Support Defense
             support_level = window['low'].min()
 
             # Count touches of support (within 0.5%)
-            touches = (
+            support_touches = (
                 (window['low'] <= support_level * 1.005) &
                 (window['low'] >= support_level * 0.995)
             ).sum()
 
-            if touches >= self.level_test_min:
+            if support_touches >= self.level_test_min:
                 # Check for breakout above support
                 next_bars = df.iloc[i:i+5]
 
@@ -229,14 +247,49 @@ class SmartMoneyDetector:
                     ):
                         setup = {
                             'direction': 'LONG',
-                            'pattern': 'level_defense',
+                            'pattern': 'support_defense',
                             'timestamp': bar.get('timestamp', i + j),
                             'entry_price': float(bar['close']),
-                            'support_level': float(support_level),
-                            'num_touches': int(touches),
+                            'level': float(support_level),
+                            'num_touches': int(support_touches),
                             'volume_ratio': float(bar['volume_ratio']),
                             'target': float(bar['close'] * 1.03),  # 3% target
                             'stop_loss': float(support_level * 0.99),  # Below support
+                        }
+                        setups.append(setup)
+                        break
+
+            # SHORT Setup: Resistance Distribution
+            resistance_level = window['high'].max()
+
+            # Count touches of resistance (within 0.5%)
+            resistance_touches = (
+                (window['high'] >= resistance_level * 0.995) &
+                (window['high'] <= resistance_level * 1.005)
+            ).sum()
+
+            if resistance_touches >= self.level_test_min:
+                # Check for breakdown below resistance
+                next_bars = df.iloc[i:i+5]
+
+                for j, row in enumerate(next_bars.iterrows()):
+                    idx, bar = row
+
+                    # Breakdown with volume
+                    if (
+                        bar['close'] < resistance_level * 0.99 and
+                        bar['volume_ratio'] > 2.0
+                    ):
+                        setup = {
+                            'direction': 'SHORT',
+                            'pattern': 'resistance_distribution',
+                            'timestamp': bar.get('timestamp', i + j),
+                            'entry_price': float(bar['close']),
+                            'level': float(resistance_level),
+                            'num_touches': int(resistance_touches),
+                            'volume_ratio': float(bar['volume_ratio']),
+                            'target': float(bar['close'] * 0.97),  # 3% target
+                            'stop_loss': float(resistance_level * 1.01),  # Above resistance
                         }
                         setups.append(setup)
                         break
