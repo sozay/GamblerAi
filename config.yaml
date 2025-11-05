@@ -31,6 +31,14 @@ data_sources:
     api_key: ${ALPHA_VANTAGE_KEY:}
     rate_limit: 500  # requests per day
 
+  alpaca:
+    enabled: true
+    paper_trading: true
+    api_key: ${ALPACA_API_KEY:PKJUPGKDCCIMZKPDXUFXHM3E4D}
+    api_secret: ${ALPACA_API_SECRET:}  # Required - get from alpaca.markets dashboard
+    base_url: https://paper-api.alpaca.markets
+    data_url: https://data.alpaca.markets
+
 analysis:
   # Momentum detection parameters
   momentum_detection:
@@ -61,6 +69,14 @@ analysis:
     min_samples: 100               # Minimum samples for significance
     confidence_level: 0.95         # 95% confidence intervals
     rolling_window_days: 90        # Period for rolling statistics
+
+# Backtesting parameters
+backtest:
+  entry_threshold_probability: 0.6  # Min continuation probability to enter trade
+  stop_loss_percentage: 2.0         # Stop loss % from entry
+  take_profit_percentage: 4.0       # Take profit % from entry
+  position_size: 10000              # Position size in dollars
+  max_holding_minutes: 120          # Maximum trade duration in minutes
 
 # Stock universe
 stocks:
