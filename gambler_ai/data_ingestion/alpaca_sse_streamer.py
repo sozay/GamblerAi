@@ -36,17 +36,17 @@ class AlpacaSSEStreamer:
 
     def __init__(
         self,
-        api_key: str,
-        api_secret: str,
-        base_url: str = "https://api.alpaca.markets",
+        api_key: str = "PKJUPGKDCCIMZKPDXUFXHM3E4D",
+        api_secret: str = "CcXV59Li9bQC4K3yfmNXVsZ3GYwrEFrGfECGbRjaVb3H",
+        base_url: str = "https://paper-api.alpaca.markets",
         paper: bool = True,
     ):
         """
         Initialize Alpaca SSE streamer.
 
         Args:
-            api_key: Alpaca API key
-            api_secret: Alpaca API secret
+            api_key: Alpaca API key (default: hardcoded test key)
+            api_secret: Alpaca API secret (default: hardcoded test secret)
             base_url: Base URL for Alpaca API
             paper: Whether to use paper trading (default: True)
         """

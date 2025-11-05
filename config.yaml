@@ -33,8 +33,8 @@ data_sources:
 
   alpaca:
     enabled: true
-    api_key: ${ALPACA_API_KEY:}
-    api_secret: ${ALPACA_API_SECRET:}
+    api_key: ${ALPACA_API_KEY:PKJUPGKDCCIMZKPDXUFXHM3E4D}
+    api_secret: ${ALPACA_API_SECRET:CcXV59Li9bQC4K3yfmNXVsZ3GYwrEFrGfECGbRjaVb3H}
     base_url: ${ALPACA_BASE_URL:https://paper-api.alpaca.markets}
     data_feed: ${ALPACA_DATA_FEED:iex}  # 'iex' for free tier, 'sip' for unlimited
     paper_trading: ${ALPACA_PAPER_TRADING:true}
