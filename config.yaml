@@ -99,6 +99,38 @@ stocks:
     min_price: 10                  # Minimum stock price
     max_price: 1000                # Maximum stock price
 
+# Stock Scanner Configuration
+scanner:
+  type: "top_movers"               # Scanner strategy: top_movers, high_volume, volatility_range, best_setups, market_cap_weighted
+  max_stocks: 3                    # Maximum stocks to select
+  scan_frequency_minutes: 1440     # How often to re-scan (1440 = daily, 0 = once)
+  universe: "liquid"               # Stock universe: liquid, tech, volatile, meme, etf, all
+
+  # Scanner-specific parameters
+  min_price_change: 1.0            # Minimum % price change (for top_movers)
+  min_volume_ratio: 1.5            # Minimum volume vs average (for high_volume)
+
+# Adaptive Strategy Configuration
+adaptive_strategy:
+  use_volatility_filter: true      # Enable volatility-adjusted strategy selection
+
+  # Regime detection parameters
+  regime_detection:
+    ema_period: 200                # EMA period for trend detection
+    bull_threshold: 1.02           # Price must be 2% above EMA for BULL
+    bear_threshold: 0.98           # Price must be 2% below EMA for BEAR
+
+  # Volatility detection parameters
+  volatility:
+    high_threshold: 0.012          # Volatility threshold (1.2% daily)
+    atr_period: 14                 # ATR calculation period
+
+  # Strategy selection rules
+  # BULL + Low Vol → Multi-Timeframe
+  # BULL + High Vol → Mean Reversion
+  # BEAR → Mean Reversion
+  # RANGE → Mean Reversion
+
 api:
   host: ${API_HOST:0.0.0.0}
   port: ${API_PORT:8000}
