@@ -9,7 +9,12 @@ import requests
 
 API_KEY = "PKJUPGKDCCIMZKPDXUFXHM3E4D"
 API_SECRET = "CcXV59Li9bQC4K3yfmNXVsZ3GYwrEFrGfECGbRjaVb3H"
-BASE_URL = "https://paper-api.alpaca.markets"
+
+# Try different base URLs
+BASE_URLS = [
+    "https://paper-api.alpaca.markets",
+    "https://api.alpaca.markets",  # Live API
+]
 
 
 def test_account_access():
@@ -18,51 +23,56 @@ def test_account_access():
     print("Testing Alpaca API Account Access")
     print("=" * 60)
     print(f"API Key: {API_KEY[:10]}...")
-    print(f"Base URL: {BASE_URL}")
     print()
 
-    try:
-        print("Making request to /v2/account endpoint...")
+    # Try different base URLs
+    for base_url in BASE_URLS:
+        try:
+            print(f"Trying: {base_url}/v2/account")
 
-        response = requests.get(
-            f"{BASE_URL}/v2/account",
-            headers={
-                "APCA-API-KEY-ID": API_KEY,
-                "APCA-API-SECRET-KEY": API_SECRET,
-            }
-        )
+            response = requests.get(
+                f"{base_url}/v2/account",
+                headers={
+                    "APCA-API-KEY-ID": API_KEY,
+                    "APCA-API-SECRET-KEY": API_SECRET,
+                },
+                timeout=5,
+            )
 
-        print(f"Response Status: {response.status_code}")
+            print(f"  Response Status: {response.status_code}")
+
+            if response.status_code == 200:
+                account = response.json()
+                print()
+                print(f"✓ SUCCESS with {base_url}!")
+                print()
+                print("Account Information:")
+                print(f"  Account ID: {account.get('id', 'N/A')}")
+                print(f"  Status: {account.get('status', 'N/A')}")
+                print(f"  Currency: {account.get('currency', 'N/A')}")
+                print(f"  Cash: ${float(account.get('cash', 0)):.2f}")
+                print(f"  Buying Power: ${float(account.get('buying_power', 0)):.2f}")
+                print(f"  Portfolio Value: ${float(account.get('portfolio_value', 0)):.2f}")
+                print(f"  Pattern Day Trader: {account.get('pattern_day_trader', False)}")
+                print(f"  Trading Blocked: {account.get('trading_blocked', False)}")
+                print(f"  Account Blocked: {account.get('account_blocked', False)}")
+
+                # Store working URL globally
+                globals()['BASE_URL'] = base_url
+                return True, base_url
+            else:
+                print(f"  Response: {response.text[:100]}")
+
+        except Exception as e:
+            print(f"  Error: {e}")
+
         print()
 
-        if response.status_code == 200:
-            account = response.json()
-            print("✓ SUCCESS: Authentication worked!")
-            print()
-            print("Account Information:")
-            print(f"  Account ID: {account.get('id', 'N/A')}")
-            print(f"  Status: {account.get('status', 'N/A')}")
-            print(f"  Currency: {account.get('currency', 'N/A')}")
-            print(f"  Cash: ${float(account.get('cash', 0)):.2f}")
-            print(f"  Buying Power: ${float(account.get('buying_power', 0)):.2f}")
-            print(f"  Portfolio Value: ${float(account.get('portfolio_value', 0)):.2f}")
-            print(f"  Pattern Day Trader: {account.get('pattern_day_trader', False)}")
-            print(f"  Trading Blocked: {account.get('trading_blocked', False)}")
-            print(f"  Account Blocked: {account.get('account_blocked', False)}")
-            return True
-        else:
-            print(f"✗ FAILED: {response.status_code}")
-            print(f"Response: {response.text}")
-            return False
-
-    except Exception as e:
-        print(f"✗ ERROR: {e}")
-        import traceback
-        traceback.print_exc()
-        return False
+    print("✗ FAILED: Could not authenticate with any base URL")
+    return False, None
 
 
-def test_positions():
+def test_positions(base_url):
     """Test getting positions."""
     print()
     print("=" * 60)
@@ -70,14 +80,15 @@ def test_positions():
     print("=" * 60)
 
     try:
-        print("Making request to /v2/positions endpoint...")
+        print(f"Making request to {base_url}/v2/positions...")
 
         response = requests.get(
-            f"{BASE_URL}/v2/positions",
+            f"{base_url}/v2/positions",
             headers={
                 "APCA-API-KEY-ID": API_KEY,
                 "APCA-API-SECRET-KEY": API_SECRET,
-            }
+            },
+            timeout=5,
         )
 
         print(f"Response Status: {response.status_code}")
@@ -106,7 +117,7 @@ def test_positions():
         return False
 
 
-def test_clock():
+def test_clock(base_url):
     """Test market clock."""
     print()
     print("=" * 60)
@@ -114,14 +125,15 @@ def test_clock():
     print("=" * 60)
 
     try:
-        print("Making request to /v2/clock endpoint...")
+        print(f"Making request to {base_url}/v2/clock...")
 
         response = requests.get(
-            f"{BASE_URL}/v2/clock",
+            f"{base_url}/v2/clock",
             headers={
                 "APCA-API-KEY-ID": API_KEY,
                 "APCA-API-SECRET-KEY": API_SECRET,
-            }
+            },
+            timeout=5,
         )
 
         print(f"Response Status: {response.status_code}")
@@ -211,12 +223,24 @@ if __name__ == "__main__":
     print("=" * 60)
 
     results = {}
+    working_base_url = None
 
     # Run tests
-    results["account"] = test_account_access()
-    results["positions"] = test_positions()
-    results["clock"] = test_clock()
-    results["market_data"] = test_market_data()
+    success, working_base_url = test_account_access()
+    results["account"] = success
+
+    if working_base_url:
+        print()
+        print(f"Using working base URL: {working_base_url}")
+        results["positions"] = test_positions(working_base_url)
+        results["clock"] = test_clock(working_base_url)
+        results["market_data"] = test_market_data()
+    else:
+        print()
+        print("⚠ Could not find working base URL, skipping other tests")
+        results["positions"] = False
+        results["clock"] = False
+        results["market_data"] = False
 
     # Summary
     print()
@@ -235,9 +259,20 @@ if __name__ == "__main__":
         print()
         print("Your Alpaca API credentials are working correctly.")
         print("The streamers should work with these credentials.")
+        if working_base_url:
+            print(f"\nWorking Base URL: {working_base_url}")
         sys.exit(0)
     else:
         print("⚠ Some tests failed")
         print()
-        print("Please check your API credentials and try again.")
+        if working_base_url:
+            print(f"Working Base URL found: {working_base_url}")
+            print("Update your code to use this URL.")
+        else:
+            print("Could not find a working base URL.")
+            print("Possible issues:")
+            print("  - Invalid API credentials")
+            print("  - Credentials may be for broker API (not trading API)")
+            print("  - Account may not be activated")
+            print("  - IP restrictions may be in place")
         sys.exit(1)

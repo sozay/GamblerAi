@@ -121,8 +121,13 @@ class AlpacaSSEStreamer:
         if symbols:
             self.subscribed_symbols.update(symbols)
 
-        # Build URL
-        url = f"{self.base_url}/v2/events/trades"
+        # Build URL - ensure base_url doesn't already have /v2
+        base = self.base_url.rstrip('/')
+        if base.endswith('/v2'):
+            url = f"{base}/events/trades"
+        else:
+            url = f"{base}/v2/events/trades"
+
         params = {}
 
         if since:
@@ -153,7 +158,13 @@ class AlpacaSSEStreamer:
         """
         logger.info("Subscribing to account status events")
 
-        url = f"{self.base_url}/v2/events/accounts/status"
+        # Build URL - ensure base_url doesn't already have /v2
+        base = self.base_url.rstrip('/')
+        if base.endswith('/v2'):
+            url = f"{base}/events/accounts/status"
+        else:
+            url = f"{base}/v2/events/accounts/status"
+
         params = {}
 
         if since:
