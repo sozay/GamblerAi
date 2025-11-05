@@ -1,0 +1,112 @@
+# GamblerAI Configuration
+
+database:
+  timeseries:
+    host: ${TIMESCALE_HOST:localhost}
+    port: ${TIMESCALE_PORT:5432}
+    name: gambler_timeseries
+    user: ${DB_USER:gambler}
+    password: ${DB_PASSWORD:gambler_pass}
+
+  analytics:
+    host: ${POSTGRES_HOST:localhost}
+    port: ${POSTGRES_PORT:5433}
+    name: gambler_analytics
+    user: ${DB_USER:gambler}
+    password: ${DB_PASSWORD:gambler_pass}
+
+redis:
+  host: ${REDIS_HOST:localhost}
+  port: ${REDIS_PORT:6379}
+  db: 0
+  ttl: 3600  # Cache TTL in seconds
+
+data_sources:
+  yahoo_finance:
+    enabled: true
+    rate_limit: 2000  # requests per hour
+
+  alpha_vantage:
+    enabled: false
+    api_key: ${ALPHA_VANTAGE_KEY:}
+    rate_limit: 500  # requests per day
+
+analysis:
+  # Momentum detection parameters
+  momentum_detection:
+    min_price_change_pct: 2.0      # Minimum % change to consider momentum
+    min_volume_ratio: 2.0           # Volume vs 20-period average
+    window_minutes: 5               # Time window for initial detection
+    lookback_periods: 20            # For volume average calculation
+
+  # Timeframes to analyze
+  timeframes:
+    - 1min
+    - 5min
+    - 15min
+    - 1hour
+
+  # Pattern analysis
+  pattern_analysis:
+    continuation_thresholds:       # Define continuation vs reversal
+      strong: 0.70                 # >70% of initial move continues
+      moderate: 0.40               # 40-70% continuation
+      weak: 0.10                   # <40% continuation
+
+    max_continuation_minutes: 60   # Max time to track continuation
+    reversal_threshold_pct: 0.5    # % retracement to consider reversal
+
+  # Statistical analysis
+  statistics:
+    min_samples: 100               # Minimum samples for significance
+    confidence_level: 0.95         # 95% confidence intervals
+    rolling_window_days: 90        # Period for rolling statistics
+
+# Stock universe
+stocks:
+  # Initial list of stocks to analyze
+  watchlist:
+    - AAPL
+    - MSFT
+    - GOOGL
+    - AMZN
+    - TSLA
+    - NVDA
+    - META
+    - AMD
+    - NFLX
+    - SPY  # S&P 500 ETF
+
+  # Filters for stock selection
+  filters:
+    min_avg_volume: 1000000        # Minimum average daily volume
+    min_price: 10                  # Minimum stock price
+    max_price: 1000                # Maximum stock price
+
+api:
+  host: ${API_HOST:0.0.0.0}
+  port: ${API_PORT:8000}
+  cors_origins:
+    - http://localhost:3000
+    - http://localhost:8501
+
+  rate_limiting:
+    enabled: true
+    requests_per_minute: 60
+
+celery:
+  broker_url: ${CELERY_BROKER_URL:redis://localhost:6379/0}
+  result_backend: ${CELERY_RESULT_BACKEND:redis://localhost:6379/0}
+  task_serializer: json
+  result_serializer: json
+  timezone: UTC
+
+logging:
+  level: ${LOG_LEVEL:INFO}
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: logs/gambler_ai.log
+
+dashboard:
+  title: "GamblerAI - Momentum Analysis Dashboard"
+  refresh_interval: 30  # seconds
+  max_events_display: 100

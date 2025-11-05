@@ -1,0 +1,122 @@
+version: '3.8'
+
+services:
+  # TimescaleDB (PostgreSQL with time-series extension)
+  timescaledb:
+    image: timescale/timescaledb:latest-pg15
+    container_name: gambler_timescaledb
+    environment:
+      POSTGRES_USER: gambler
+      POSTGRES_PASSWORD: gambler_pass
+      POSTGRES_DB: gambler_timeseries
+    ports:
+      - "5432:5432"
+    volumes:
+      - timescale_data:/var/lib/postgresql/data
+      - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/init.sql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gambler"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # PostgreSQL for analytics results
+  postgres:
+    image: postgres:15-alpine
+    container_name: gambler_postgres
+    environment:
+      POSTGRES_USER: gambler
+      POSTGRES_PASSWORD: gambler_pass
+      POSTGRES_DB: gambler_analytics
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gambler"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis for caching and Celery broker
+  redis:
+    image: redis:7-alpine
+    container_name: gambler_redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    command: redis-server --appendonly yes
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Celery Worker (for async tasks)
+  celery_worker:
+    build: .
+    container_name: gambler_celery_worker
+    command: celery -A gambler_ai.tasks worker --loglevel=info
+    depends_on:
+      - redis
+      - timescaledb
+      - postgres
+    environment:
+      - DATABASE_URL=postgresql://gambler:gambler_pass@timescaledb:5432/gambler_timeseries
+      - ANALYTICS_DB_URL=postgresql://gambler:gambler_pass@postgres:5432/gambler_analytics
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - ./gambler_ai:/app/gambler_ai
+      - ./config.yaml:/app/config.yaml
+
+  # Flower (Celery monitoring)
+  flower:
+    build: .
+    container_name: gambler_flower
+    command: celery -A gambler_ai.tasks flower --port=5555
+    ports:
+      - "5555:5555"
+    depends_on:
+      - redis
+      - celery_worker
+    environment:
+      - CELERY_BROKER_URL=redis://redis:6379/0
+
+  # FastAPI Application
+  api:
+    build: .
+    container_name: gambler_api
+    command: uvicorn gambler_ai.api.main:app --host 0.0.0.0 --port 8000 --reload
+    ports:
+      - "8000:8000"
+    depends_on:
+      - timescaledb
+      - postgres
+      - redis
+    environment:
+      - DATABASE_URL=postgresql://gambler:gambler_pass@timescaledb:5432/gambler_timeseries
+      - ANALYTICS_DB_URL=postgresql://gambler:gambler_pass@postgres:5432/gambler_analytics
+      - REDIS_URL=redis://redis:6379/0
+    volumes:
+      - ./gambler_ai:/app/gambler_ai
+      - ./config.yaml:/app/config.yaml
+
+  # Streamlit Dashboard
+  dashboard:
+    build: .
+    container_name: gambler_dashboard
+    command: streamlit run gambler_ai/dashboard/app.py --server.port 8501 --server.address 0.0.0.0
+    ports:
+      - "8501:8501"
+    depends_on:
+      - api
+    environment:
+      - API_URL=http://api:8000
+    volumes:
+      - ./gambler_ai:/app/gambler_ai
+
+volumes:
+  timescale_data:
+  postgres_data:
+  redis_data:
