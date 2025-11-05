@@ -6,9 +6,23 @@ This trading bot automatically:
 1. **Monitors** real-time market data via Alpaca WebSocket
 2. **Detects** market regime (BULL/BEAR/RANGE) and volatility
 3. **Selects** optimal strategy for current conditions
-4. **Generates** trading signals
-5. **Executes** trades with stop loss and take profit
-6. **Manages** positions and risk
+4. **Chooses** which stocks to trade (fixed list OR automatic screening)
+5. **Generates** trading signals
+6. **Executes** trades with stop loss and take profit
+7. **Manages** positions and risk
+
+## Two Modes of Operation
+
+### Mode 1: Fixed Symbol List (Simple)
+✅ Trade a predefined list of stocks
+✅ Full control over what's traded
+✅ Best for beginners
+
+### Mode 2: Dynamic Stock Screening (Advanced)
+✅ Automatically scan 50+ stocks
+✅ Find best opportunities using 4 strategies
+✅ Rescan every hour for new setups
+✅ Adapt to changing market conditions
 
 ## Quick Start
 
@@ -33,13 +47,22 @@ ALPACA_API_SECRET=your_secret
 
 ### 3. Run the Bot
 
-```bash
-./run_trading_bot.sh
-```
-
-Or directly:
+**Option A: Fixed Symbol List (Recommended for beginners)**
 ```bash
 python trading_bot.py
+# Trades: SPY, QQQ, AAPL, MSFT
+```
+
+**Option B: Dynamic Stock Screening (Advanced)**
+```bash
+python trading_bot.py --screening
+# Automatically finds and trades best opportunities
+# Rescans every hour
+```
+
+Or use the quick start script:
+```bash
+./run_trading_bot.sh
 ```
 
 ## What You'll See

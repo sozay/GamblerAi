@@ -18,6 +18,7 @@ import logging
 from gambler_ai.data_ingestion import AlpacaWebSocketStreamer
 from gambler_ai.analysis.adaptive_strategy import AdaptiveStrategySelector
 from gambler_ai.analysis.regime_detector import RegimeDetector
+from gambler_ai.screening import StockScreener, StockRanker
 from examples.alpaca_order_types_example import AlpacaTradingClient
 
 
@@ -46,12 +47,14 @@ class TradingBot:
         self,
         api_key: str = None,
         api_secret: str = None,
-        symbols: List[str] = ["SPY", "QQQ", "AAPL"],
+        symbols: List[str] = None,  # None = use dynamic screening
+        use_dynamic_screening: bool = False,  # Enable stock screening
         max_position_size: float = 10000.0,  # Max $ per position
         risk_per_trade: float = 0.02,  # Risk 2% per trade
         stop_loss_pct: float = 0.03,  # 3% stop loss
         take_profit_pct: float = 0.06,  # 6% take profit (2:1 R:R)
         paper_trading: bool = True,
+        screening_interval: int = 3600,  # Rescan every hour
     ):
         """
         Initialize trading bot.
@@ -59,14 +62,24 @@ class TradingBot:
         Args:
             api_key: Alpaca API key
             api_secret: Alpaca API secret
-            symbols: List of symbols to trade
+            symbols: List of symbols to trade (None = use screening)
+            use_dynamic_screening: Enable automatic stock screening
             max_position_size: Maximum $ per position
             risk_per_trade: Risk % per trade
             stop_loss_pct: Stop loss percentage
             take_profit_pct: Take profit percentage
             paper_trading: Use paper trading account
+            screening_interval: Seconds between rescans
         """
-        self.symbols = symbols
+        self.use_dynamic_screening = use_dynamic_screening
+        self.screening_interval = screening_interval
+        self.last_screening_time = None
+
+        # Set default symbols if not provided
+        if symbols is None:
+            self.symbols = ["SPY", "QQQ", "AAPL", "MSFT"] if not use_dynamic_screening else []
+        else:
+            self.symbols = symbols
         self.max_position_size = max_position_size
         self.risk_per_trade = risk_per_trade
         self.stop_loss_pct = stop_loss_pct
@@ -90,6 +103,17 @@ class TradingBot:
         self.strategy_selector = AdaptiveStrategySelector(
             use_volatility_filter=True
         )
+
+        # Initialize stock screener if using dynamic selection
+        if self.use_dynamic_screening:
+            self.screener = StockScreener(
+                api_key=api_key or os.getenv("ALPACA_API_KEY", "PKJUPGKDCCIMZKPDXUFXHM3E4D"),
+                api_secret=api_secret or os.getenv("ALPACA_API_SECRET", "CcXV59Li9bQC4K3yfmNXVsZ3GYwrEFrGfECGbRjaVb3H"),
+            )
+            self.ranker = StockRanker()
+        else:
+            self.screener = None
+            self.ranker = None
 
         # Data buffers for each symbol
         self.price_data: Dict[str, pd.DataFrame] = {symbol: pd.DataFrame() for symbol in symbols}
@@ -152,6 +176,11 @@ class TradingBot:
             # Main loop
             while True:
                 time.sleep(60)  # Check every minute
+
+                # Periodic screening if enabled
+                if self.use_dynamic_screening:
+                    self._periodic_screening()
+
                 self._check_positions()
                 self._log_status()
 
@@ -373,11 +402,66 @@ class TradingBot:
         except Exception as e:
             logger.error(f"Error closing positions: {e}")
 
+    def _periodic_screening(self):
+        """Periodically rescan for new trading opportunities."""
+        now = datetime.now()
+
+        # Check if it's time to rescan
+        if self.last_screening_time is None or \
+           (now - self.last_screening_time).total_seconds() >= self.screening_interval:
+
+            logger.info("\n🔍 Running periodic stock screening...")
+
+            try:
+                # Screen for opportunities
+                results = self.screener.screen_all(top_n_per_strategy=3)
+
+                # Get top picks
+                top_picks = self.screener.get_combined_top_picks(top_n=5)
+
+                # Update symbols list
+                new_symbols = [pick.symbol for pick in top_picks]
+
+                # Add new symbols, keep existing ones we have positions in
+                for symbol in new_symbols:
+                    if symbol not in self.symbols:
+                        logger.info(f"  ➕ Adding {symbol} to watchlist")
+                        self.symbols.append(symbol)
+
+                        # Subscribe to this symbol
+                        self.streamer.subscribe_bars([symbol])
+
+                        # Initialize data buffer
+                        self.bar_data[symbol] = []
+                        self.price_data[symbol] = pd.DataFrame()
+
+                # Remove symbols we're not in a position for (after some time)
+                # Keep at least the top picks
+                if len(self.symbols) > 10:  # Limit watchlist size
+                    for symbol in list(self.symbols):
+                        if symbol not in new_symbols and symbol not in self.positions:
+                            logger.info(f"  ➖ Removing {symbol} from watchlist")
+                            self.symbols.remove(symbol)
+                            self.streamer.unsubscribe_bars([symbol])
+
+                self.last_screening_time = now
+
+                logger.info(f"✓ Screening complete. Watching {len(self.symbols)} symbols")
+
+            except Exception as e:
+                logger.error(f"Error in periodic screening: {e}")
+
     def _log_status(self):
         """Log current bot status."""
         logger.info(f"\n📊 Status Update - {datetime.now().strftime('%H:%M:%S')}")
+        logger.info(f"   Watching: {len(self.symbols)} symbols")
         logger.info(f"   Active Positions: {len(self.positions)}")
         logger.info(f"   Total Trades: {self.trades_executed}")
+
+        if self.use_dynamic_screening and self.last_screening_time:
+            elapsed = (datetime.now() - self.last_screening_time).total_seconds()
+            next_scan = max(0, self.screening_interval - elapsed)
+            logger.info(f"   Next screening: {int(next_scan/60)} minutes")
 
         if self.positions:
             logger.info("\n   Current Positions:")
@@ -391,14 +475,33 @@ class TradingBot:
 
 def main():
     """Run the trading bot."""
-    bot = TradingBot(
-        symbols=["SPY", "QQQ", "AAPL", "MSFT"],
-        max_position_size=10000.0,
-        risk_per_trade=0.02,
-        stop_loss_pct=0.03,
-        take_profit_pct=0.06,
-        paper_trading=True,
-    )
+    import sys
+
+    # Check if user wants dynamic screening
+    use_screening = "--screening" in sys.argv or "-s" in sys.argv
+
+    if use_screening:
+        logger.info("Running with DYNAMIC STOCK SCREENING")
+        bot = TradingBot(
+            use_dynamic_screening=True,
+            screening_interval=3600,  # Rescan every hour
+            max_position_size=10000.0,
+            risk_per_trade=0.02,
+            stop_loss_pct=0.03,
+            take_profit_pct=0.06,
+            paper_trading=True,
+        )
+    else:
+        logger.info("Running with FIXED SYMBOL LIST")
+        bot = TradingBot(
+            symbols=["SPY", "QQQ", "AAPL", "MSFT"],
+            use_dynamic_screening=False,
+            max_position_size=10000.0,
+            risk_per_trade=0.02,
+            stop_loss_pct=0.03,
+            take_profit_pct=0.06,
+            paper_trading=True,
+        )
 
     bot.start()
 
