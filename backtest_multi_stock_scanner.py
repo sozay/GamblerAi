@@ -203,7 +203,7 @@ def run_scanner_backtest(
     # Get total date range
     sample_df = list(stock_data.values())[0]
     total_bars = len(sample_df)
-    bars_per_day = 20  # Assuming this
+    bars_per_day = 5  # Match what we generate
     scan_frequency_bars = scan_frequency_days * bars_per_day
 
     # Simulate scanning at intervals
@@ -293,7 +293,7 @@ def run_scanner_backtest(
 
 
 def compare_scanner_strategies(
-    start_year: int = 2020,
+    start_year: int = 2023,
     end_year: int = 2024,
 ):
     """
@@ -305,11 +305,11 @@ def compare_scanner_strategies(
     print("=" * 120)
     print()
 
-    # Define stock universe
-    symbols = ["SPY", "AAPL", "MSFT", "GOOGL", "NVDA", "AMD", "TSLA", "JPM", "BAC", "WMT", "JNJ"]
+    # Define stock universe (reduced for faster testing)
+    symbols = ["SPY", "AAPL", "NVDA", "TSLA", "JPM", "WMT"]
 
-    # Generate data
-    stock_data = generate_multi_stock_data(symbols, start_year, end_year)
+    # Generate data (fewer bars per day for speed)
+    stock_data = generate_multi_stock_data(symbols, start_year, end_year, bars_per_day=5)
 
     # Calculate market (SPY) performance
     spy_return = (stock_data['SPY']['close'].iloc[-1] - stock_data['SPY']['close'].iloc[0]) / stock_data['SPY']['close'].iloc[0]
@@ -333,7 +333,7 @@ def compare_scanner_strategies(
         result = run_scanner_backtest(
             scanner_type=scanner_type,
             stock_data=stock_data,
-            scan_frequency_days=5,
+            scan_frequency_days=20,  # Scan every 20 days for speed
             max_stocks=3,
             initial_capital=100000,
         )
@@ -434,7 +434,8 @@ def compare_scanner_strategies(
 
 
 if __name__ == "__main__":
-    compare_scanner_strategies(start_year=2020, end_year=2024)
+    # Fast test: 2 years, 6 stocks, scan every 20 days
+    compare_scanner_strategies()  # Uses defaults: 2023-2024
 
     print("\n✅ Multi-stock scanner comparison complete!")
     print()
