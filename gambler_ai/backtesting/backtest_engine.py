@@ -40,7 +40,11 @@ class BacktestEngine:
         self.commission = commission
 
         self.trade_manager = None
-        self.db = get_timeseries_db()
+        self.current_capital = initial_capital
+        try:
+            self.db = get_timeseries_db()
+        except:
+            self.db = None  # Allow for backtesting without database
 
     def run_momentum_backtest(
         self,
@@ -365,3 +369,116 @@ class BacktestEngine:
         }
 
         return aggregated_metrics
+
+    def run_backtest(self, df: pd.DataFrame, detector) -> List[Trade]:
+        """
+        Generic backtest method that works with any detector that has a detect_setups method.
+        This method works with DataFrame data and does not require database.
+
+        Args:
+            df: DataFrame with OHLCV data (timestamp, open, high, low, close, volume)
+            detector: Strategy detector object with detect_setups(df) method
+
+        Returns:
+            List of Trade objects
+        """
+        # Initialize trade manager
+        self.trade_manager = TradeManager(
+            initial_capital=self.initial_capital,
+            risk_per_trade=self.risk_per_trade,
+        )
+
+        # Detect setups
+        setups = detector.detect_setups(df)
+
+        # Simulate each setup
+        for setup in setups:
+            if not self.trade_manager.can_open_trade(self.max_concurrent_trades):
+                continue
+
+            entry_time = setup.get('entry_time') or setup.get('timestamp')
+            entry_price = setup['entry_price']
+            direction = TradeDirection.LONG if setup['direction'] == 'LONG' else TradeDirection.SHORT
+
+            # Get or calculate stop loss and target
+            if 'stop_loss' in setup and 'target' in setup:
+                stop_loss = setup['stop_loss']
+                target = setup['target']
+            else:
+                # Default risk/reward if not provided
+                if direction == TradeDirection.LONG:
+                    stop_loss = entry_price * 0.99  # 1% stop
+                    target = entry_price * 1.03  # 3% target
+                else:
+                    stop_loss = entry_price * 1.01  # 1% stop
+                    target = entry_price * 0.97  # 3% target
+
+            # Open trade
+            trade = self.trade_manager.open_trade(
+                symbol=df['symbol'].iloc[0] if 'symbol' in df.columns else 'UNKNOWN',
+                direction=direction,
+                entry_time=entry_time,
+                entry_price=entry_price,
+                stop_loss=stop_loss,
+                target=target,
+                strategy_name=setup.get('setup_type', 'Unknown'),
+                setup_data=setup,
+            )
+
+            # Find entry index in dataframe
+            entry_idx = df[df['timestamp'] == entry_time].index
+            if len(entry_idx) == 0:
+                # Entry time not found, close immediately
+                trade.close(entry_time, entry_price, "no_data")
+                self.trade_manager.close_trade(trade)
+                continue
+
+            entry_idx = entry_idx[0]
+
+            # Simulate price movement after entry (look ahead 60 bars or until end)
+            max_lookforward = min(60, len(df) - entry_idx - 1)
+
+            for i in range(1, max_lookforward + 1):
+                bar_idx = entry_idx + i
+                if bar_idx >= len(df):
+                    break
+
+                row = df.iloc[bar_idx]
+                current_time = row['timestamp']
+                current_price = row['close']
+                high = row['high']
+                low = row['low']
+
+                # Update excursions
+                trade.update_excursions(current_price)
+
+                # Check exit conditions
+                if direction == TradeDirection.LONG:
+                    if low <= stop_loss:
+                        trade.close(current_time, stop_loss, "stop_loss")
+                        self.trade_manager.close_trade(trade)
+                        break
+                    if high >= target:
+                        trade.close(current_time, target, "target")
+                        self.trade_manager.close_trade(trade)
+                        break
+                else:  # SHORT
+                    if high >= stop_loss:
+                        trade.close(current_time, stop_loss, "stop_loss")
+                        self.trade_manager.close_trade(trade)
+                        break
+                    if low <= target:
+                        trade.close(current_time, target, "target")
+                        self.trade_manager.close_trade(trade)
+                        break
+
+            # If trade still open, close at last price (time stop)
+            if trade.exit_time is None:
+                last_bar = df.iloc[min(entry_idx + max_lookforward, len(df) - 1)]
+                trade.close(last_bar['timestamp'], last_bar['close'], "time_stop")
+                self.trade_manager.close_trade(trade)
+
+        # Update current capital
+        self.current_capital = self.trade_manager.current_capital
+
+        return self.trade_manager.closed_trades
