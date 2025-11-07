@@ -85,8 +85,11 @@ def check_data_availability(start_date: datetime, end_date: datetime, interval: 
     for file in files:
         try:
             df = pd.read_parquet(file)
-            if 'timestamp' in df.columns and 'symbol' in df.columns:
-                df['timestamp'] = pd.to_datetime(df['timestamp'])
+            # Check for timestamp column (use 'Datetime' as fallback for Yahoo data)
+            timestamp_col = 'timestamp' if 'timestamp' in df.columns else ('Datetime' if 'Datetime' in df.columns else None)
+
+            if timestamp_col:
+                df['timestamp'] = pd.to_datetime(df[timestamp_col])
                 file_start = df['timestamp'].min()
                 file_end = df['timestamp'].max()
 
@@ -95,9 +98,14 @@ def check_data_availability(start_date: datetime, end_date: datetime, interval: 
                     file_start = file_start.tz_localize(None)
                     file_end = file_end.tz_localize(None)
 
-                # Check if file covers our range
-                if file_start <= pd.Timestamp(start_date) and file_end >= pd.Timestamp(end_date):
-                    symbol = df['symbol'].iloc[0] if 'symbol' in df.columns else None
+                # Check if file overlaps with our requested range
+                # File is useful if: file_start is before/at requested_end AND file_end is after/at requested_start
+                requested_start = pd.Timestamp(start_date)
+                requested_end = pd.Timestamp(end_date)
+
+                if file_start <= requested_end and file_end >= requested_start:
+                    # Extract symbol from filename (format: AAPL_1h_20241108_20251107.parquet)
+                    symbol = df['symbol'].iloc[0] if 'symbol' in df.columns else file.name.split('_')[0]
                     if symbol and symbol not in available_symbols:
                         available_symbols.append(symbol)
         except:
@@ -352,6 +360,7 @@ def run_simulation_section(config):
                 start_date=config['start_date'],
                 end_date=config['end_date'],
                 initial_capital=config['initial_capital'],
+                interval=config['interval'],  # Pass the selected interval!
                 results_dir="simulation_results_real"
             )
 

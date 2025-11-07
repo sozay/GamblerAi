@@ -1,0 +1,10 @@
+{
+  "name": "Very Aggressive",
+  "mean_reversion_z": -1.0,
+  "momentum_return": 0.001,
+  "momentum_volume": 1.03,
+  "volatility_atr": 1.5,
+  "hold_period": 12,
+  "stop_loss": -0.02,
+  "take_profit": 0.04
+}
