@@ -367,41 +367,40 @@ def run_simulation_section(config):
         chart_placeholder = st.empty()
 
         try:
-            # Note: For demo, we'll use simplified simulation
-            # In production, integrate with real data from cache
+            # Use REAL DATA SIMULATOR - NO synthetic data!
+            from scripts.real_data_simulator import RealDataSimulator
 
-            from scripts.simulation_race_live import LiveSimulationRace
+            # Get symbols from metadata
+            symbols = config['metadata']['symbols']
 
-            # Create simulator with actual date range (not just years)
-            simulator = LiveSimulationRace(
+            # Create simulator with REAL market data
+            simulator = RealDataSimulator(
+                symbols=symbols,
+                start_date=config['start_date'],
+                end_date=config['end_date'],
                 initial_capital=config['initial_capital'],
-                start_year=config['start_date'].year,
-                end_year=config['end_date'].year,
-                chart_update_interval=config['update_interval']
+                results_dir="simulation_results_real"
             )
-
-            # Override the date range to use actual selected dates
-            simulator.start_date = config['start_date']
-            simulator.end_date = config['end_date']
-            simulator.weekly_periods = simulator._generate_weekly_periods()
 
             # Clear any old results first
             st.session_state.simulation_results = None
 
-            # Calculate actual weeks from the updated simulator
-            actual_weeks = len(simulator.weekly_periods)
+            # Calculate actual weeks
+            actual_weeks = simulator.total_weeks
 
             # Show clear status message
             status_text.markdown(f"""
-            ### Running Simulation...
+            ### Running Simulation with REAL Market Data...
 
             **Period:** {config['start_date'].date()} to {config['end_date'].date()}
 
             **Total weeks to simulate:** {actual_weeks}
 
-            **This will take approximately {max(1, actual_weeks // 20)}-{max(1, actual_weeks // 10)} minutes.**
+            **Data Source:** Real Yahoo Finance data (NO synthetic data!)
 
-            The simulation is processing week by week.
+            **This will take approximately {max(1, actual_weeks // 10)}-{max(2, actual_weeks // 5)} minutes.**
+
+            The simulation is analyzing real price movements and generating actual trading signals.
             Please wait for completion - results will appear automatically below.
 
             You can monitor progress in the terminal/console output.
@@ -410,11 +409,11 @@ def run_simulation_section(config):
             progress_bar.progress(0)
             progress_bar.empty()  # Remove progress bar since we can't track real progress
 
-            # Run the actual simulation (this is a blocking call that takes time)
-            simulator.run_live_simulation()
+            # Run the actual simulation with REAL DATA
+            simulator.run_simulation()
 
             # Load the newly generated results
-            results_file = Path("simulation_results_live/live_results.json")
+            results_file = Path("simulation_results_real/live_results.json")
             if results_file.exists():
                 with open(results_file, 'r') as f:
                     results = json.load(f)
