@@ -110,11 +110,59 @@ def download_data_section():
             df = pd.DataFrame(summary_data)
             st.dataframe(df, use_container_width=True, hide_index=True)
 
-        if st.button("🔄 Re-download Data", key="redownload"):
-            with st.spinner("Downloading data..."):
-                downloader = DataDownloader()
-                downloader.download_full_dataset(years=10, interval="1d")
-                st.rerun()
+        st.markdown("### 📥 Download Additional Data")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            st.markdown("**Download 1-Minute Data (Last 7 Days)**")
+            st.info("⚠️ Yahoo Finance only provides 1-minute data for the last 7 days")
+
+            if st.button("📊 Download 7-Day 1-Min Data", key="download_1min"):
+                with st.spinner("Downloading 1-minute data for last 7 days..."):
+                    from datetime import datetime, timedelta
+                    downloader = DataDownloader()
+
+                    # Download last 7 days of 1-minute data
+                    end_date = datetime.now()
+                    start_date = end_date - timedelta(days=7)
+
+                    symbols = metadata['symbols']
+                    data = downloader.download_multiple_symbols(
+                        symbols=symbols,
+                        start_date=start_date,
+                        end_date=end_date,
+                        interval="1m"
+                    )
+
+                    if data:
+                        st.success(f"✅ Downloaded 1-minute data for {len(data)} symbols!")
+                        st.info(f"📅 Period: {start_date.date()} to {end_date.date()}")
+                        st.rerun()
+                    else:
+                        st.error("❌ Failed to download 1-minute data")
+
+        with col2:
+            st.markdown("**Re-download Full Historical Data**")
+
+            new_years = st.slider("Years", 1, 10, 10, key="redownload_years")
+            new_interval = st.selectbox("Interval", ["1d", "1h", "15m", "5m"], key="redownload_interval")
+
+            if st.button("🔄 Re-download Data", key="redownload"):
+                with st.spinner(f"Downloading {new_years} years of {new_interval} data..."):
+                    downloader = DataDownloader()
+
+                    # Calculate days based on interval limitations
+                    if new_interval == "1m":
+                        days_to_download = 7
+                        st.warning("1-minute data limited to 7 days")
+                    elif new_interval in ["5m", "15m", "1h"]:
+                        days_to_download = min(60, new_years * 365)
+                    else:
+                        days_to_download = new_years * 365
+
+                    downloader.download_full_dataset(years=days_to_download/365, interval=new_interval)
+                    st.rerun()
 
     else:
         st.warning("⚠️ No historical data found. Please download data first.")
