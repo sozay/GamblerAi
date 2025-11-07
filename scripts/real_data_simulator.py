@@ -87,30 +87,63 @@ class RealDataSimulator:
         """Load real market data from cache."""
         logger.info("Loading real market data from cache...")
 
-        downloader = DataDownloader()
         cache_dir = Path("market_data_cache")
 
         if not cache_dir.exists():
-            logger.error("No cached data found! Please download data first.")
+            logger.error(f"Cache directory not found: {cache_dir.absolute()}")
+            logger.error("Please download data first using the '📊 Download 7-Day 1-Min Data' button")
             return
+
+        # List all files in cache
+        all_files = list(cache_dir.glob("*.*"))
+        logger.info(f"Found {len(all_files)} files in cache directory")
+
+        if all_files:
+            logger.info(f"Sample files: {[f.name for f in all_files[:5]]}")
 
         # Load data for each symbol
         for symbol in self.symbols:
-            # Find cache files for this symbol
-            cache_files = list(cache_dir.glob(f"{symbol}_*.parquet"))
+            # Find cache files for this symbol - try multiple patterns
+            cache_files = []
+
+            # Try different patterns
+            patterns = [
+                f"{symbol}_*.parquet",
+                f"{symbol}_*.csv",
+                f"{symbol.lower()}_*.parquet",
+            ]
+
+            for pattern in patterns:
+                found = list(cache_dir.glob(pattern))
+                if found:
+                    cache_files.extend(found)
+                    logger.info(f"Found {len(found)} files for {symbol} with pattern {pattern}")
 
             if not cache_files:
-                logger.warning(f"No cached data for {symbol}")
+                logger.warning(f"No cached data for {symbol} (tried patterns: {patterns})")
                 continue
 
             # Load all cache files and combine
             symbol_dfs = []
             for cache_file in cache_files:
                 try:
+                    logger.debug(f"Loading {cache_file}")
                     df = pd.read_parquet(cache_file)
+
+                    # Ensure timestamp column exists
+                    if 'timestamp' not in df.columns:
+                        logger.warning(f"No timestamp column in {cache_file}, columns: {df.columns.tolist()}")
+                        # Try to find datetime-like column
+                        for col in df.columns:
+                            if 'date' in col.lower() or 'time' in col.lower():
+                                df['timestamp'] = pd.to_datetime(df[col])
+                                logger.info(f"Using column '{col}' as timestamp")
+                                break
+
                     if 'timestamp' in df.columns:
                         df['timestamp'] = pd.to_datetime(df['timestamp'])
                         symbol_dfs.append(df)
+                        logger.info(f"Loaded {len(df)} rows from {cache_file.name}")
                 except Exception as e:
                     logger.error(f"Error loading {cache_file}: {e}")
 
