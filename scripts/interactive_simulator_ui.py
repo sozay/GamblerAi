@@ -81,6 +81,47 @@ def check_data_availability():
     return metadata
 
 
+def check_existing_data(days: int, interval: str) -> bool:
+    """Check if data already exists for the requested period."""
+    from datetime import datetime, timedelta
+
+    cache_dir = Path("market_data_cache")
+    if not cache_dir.exists():
+        return False
+
+    end_date = datetime.now()
+    start_date = end_date - timedelta(days=days)
+
+    # Check for any parquet files in the date range
+    pattern = f"*_{interval}_*.parquet"
+    files = list(cache_dir.glob(pattern))
+
+    if not files:
+        return False
+
+    # Check if files cover the requested date range
+    for file in files:
+        try:
+            df = pd.read_parquet(file)
+            if 'timestamp' in df.columns:
+                df['timestamp'] = pd.to_datetime(df['timestamp'])
+                file_start = df['timestamp'].min()
+                file_end = df['timestamp'].max()
+
+                # Remove timezone for comparison
+                if pd.api.types.is_datetime64tz_dtype(df['timestamp']):
+                    file_start = file_start.tz_localize(None)
+                    file_end = file_end.tz_localize(None)
+
+                # Check if file covers our range
+                if file_start <= pd.Timestamp(start_date) and file_end >= pd.Timestamp(end_date):
+                    return True
+        except:
+            continue
+
+    return False
+
+
 def download_data_section():
     """Data download section."""
     st.markdown("## 📥 Step 1: Download Historical Data")
@@ -95,8 +136,6 @@ def download_data_section():
         col2.metric("Data Available From", metadata['start_date'][:10])
         col3.metric("Data Available To", metadata['end_date'][:10])
 
-        st.info("📌 This shows the FULL data range available. In Step 2 below, you can select any time period within this range for your simulation.")
-
         with st.expander("📊 View Data Summary"):
             summary_data = []
             for symbol, info in metadata['data_summary'].items():
@@ -110,130 +149,66 @@ def download_data_section():
             df = pd.DataFrame(summary_data)
             st.dataframe(df, width='stretch', hide_index=True)
 
-        st.markdown("### 📥 Download Additional Data")
+        st.markdown("### 📥 Download More Data")
 
-        col1, col2, col3 = st.columns(3)
+    # Simple unified download form
+    col1, col2, col3 = st.columns([2, 2, 1])
 
-        with col1:
-            st.markdown("**Yahoo Finance (7 Days Max)**")
-            st.info("⚠️ Yahoo Finance only provides 1-minute data for the last 7 days")
+    with col1:
+        days = st.number_input("Days of history", min_value=1, max_value=365, value=30, step=1,
+                               help="Number of days to download (1-365)")
 
-            if st.button("📊 Download 7-Day 1-Min Data", key="download_1min"):
-                with st.spinner("Downloading 1-minute data for last 7 days..."):
-                    from datetime import datetime, timedelta
-                    downloader = DataDownloader()
+    with col2:
+        interval = st.selectbox(
+            "Interval",
+            ["1m", "5m", "15m", "1h", "1d"],
+            index=0,
+            help="1m=1 minute, 5m=5 minutes, 1h=1 hour, 1d=1 day"
+        )
 
-                    # Download last 7 days of 1-minute data
-                    end_date = datetime.now()
-                    start_date = end_date - timedelta(days=7)
+    with col3:
+        st.markdown("<br>", unsafe_allow_html=True)
+        download_clicked = st.button("📥 Download", type="primary")
 
-                    symbols = metadata['symbols']
-                    data = downloader.download_multiple_symbols(
-                        symbols=symbols,
-                        start_date=start_date,
-                        end_date=end_date,
-                        interval="1m"
-                    )
-
-                    if data:
-                        st.success(f"✅ Downloaded 1-minute data for {len(data)} symbols!")
-                        st.info(f"📅 Period: {start_date.date()} to {end_date.date()}")
-                        st.rerun()
-                    else:
-                        st.error("❌ Failed to download 1-minute data")
-
-        with col2:
-            st.markdown("**Alpaca (1+ Months)**")
-            st.info("✨ Alpaca provides extended historical 1-minute data")
-
-            alpaca_days = st.slider("Days of data", 7, 90, 30, key="alpaca_days", help="Download 1-minute data for up to 90 days")
-
-            if st.button("🚀 Download Alpaca Data", key="download_alpaca"):
-                with st.spinner(f"Downloading {alpaca_days} days of 1-minute data from Alpaca..."):
-                    from datetime import datetime, timedelta
-                    from scripts.enhanced_data_downloader import EnhancedDataDownloader
-
-                    # Download from Alpaca
-                    end_date = datetime.now()
-                    start_date = end_date - timedelta(days=alpaca_days)
-
-                    symbols = metadata['symbols']
-                    downloader = EnhancedDataDownloader()
-                    data = downloader.download_alpaca(
-                        symbols=symbols,
-                        start_date=start_date,
-                        end_date=end_date,
-                        timeframe="1Min"
-                    )
-
-                    if data:
-                        st.success(f"✅ Downloaded 1-minute data for {len(data)} symbols from Alpaca!")
-                        st.info(f"📅 Period: {start_date.date()} to {end_date.date()}")
-                        st.rerun()
-                    else:
-                        st.error("❌ Failed to download data from Alpaca. Check ALPACA_API_SECRET environment variable.")
-
-        with col3:
-            st.markdown("**Re-download Full Historical**")
-
-            new_years = st.slider("Years", 1, 10, 10, key="redownload_years")
-            new_interval = st.selectbox("Interval", ["1d", "1h", "15m", "5m"], key="redownload_interval")
-
-            if st.button("🔄 Re-download", key="redownload"):
-                with st.spinner(f"Downloading {new_years} years of {new_interval} data..."):
-                    downloader = DataDownloader()
-
-                    # Calculate days based on interval limitations
-                    if new_interval == "1m":
-                        days_to_download = 7
-                        st.warning("1-minute data limited to 7 days")
-                    elif new_interval in ["5m", "15m", "1h"]:
-                        days_to_download = min(60, new_years * 365)
-                    else:
-                        days_to_download = new_years * 365
-
-                    downloader.download_full_dataset(years=days_to_download/365, interval=new_interval)
-                    st.rerun()
-
+    # Get symbols from metadata or use default
+    if metadata:
+        symbols = metadata['symbols']
     else:
-        st.warning("⚠️ No historical data found. Please download data first.")
-
-        st.markdown("### Download Configuration")
-
-        col1, col2 = st.columns(2)
-
-        with col1:
-            years = st.slider("Years of history", 1, 10, 10)
-
-        with col2:
-            interval = st.selectbox(
-                "Data interval",
-                ["1d", "1h", "15m", "5m"],
-                help="Note: Minute data (5m, 15m) limited to recent periods"
-            )
-
         symbols_input = st.text_input(
             "Symbols (comma-separated)",
             "AAPL,MSFT,GOOGL,AMZN,TSLA,NVDA,META,AMD,NFLX,SPY"
         )
+        symbols = [s.strip().upper() for s in symbols_input.split(',')]
 
-        if st.button("📥 Download Data", type="primary"):
-            symbols = [s.strip().upper() for s in symbols_input.split(',')]
+    # Download data
+    if download_clicked:
+        # Check if data already exists
+        if check_existing_data(days, interval):
+            st.info(f"ℹ️ Data for {days} days at {interval} interval already exists. Skipping download.")
+        else:
+            with st.spinner(f"Downloading {days} days of {interval} data for {len(symbols)} symbols..."):
+                from datetime import datetime, timedelta
+                from scripts.enhanced_data_downloader import EnhancedDataDownloader
 
-            with st.spinner(f"Downloading {years} years of data for {len(symbols)} symbols..."):
-                downloader = DataDownloader()
-                data = downloader.download_full_dataset(
+                end_date = datetime.now()
+                start_date = end_date - timedelta(days=days)
+
+                # Use enhanced downloader with auto source selection
+                downloader = EnhancedDataDownloader()
+                data = downloader.download_auto(
                     symbols=symbols,
-                    years=years,
+                    start_date=start_date,
+                    end_date=end_date,
                     interval=interval
                 )
 
                 if data:
-                    st.success(f"✅ Downloaded data for {len(data)} symbols!")
-                    st.session_state.data_downloaded = True
+                    st.success(f"✅ Downloaded {interval} data for {len(data)} symbols!")
+                    st.info(f"📅 Period: {start_date.date()} to {end_date.date()}")
                     st.rerun()
                 else:
-                    st.error("❌ Failed to download data")
+                    st.error("❌ Failed to download data. Check your Alpaca credentials or try a shorter period.")
+                    st.info("💡 Tip: For Alpaca data, set ALPACA_API_SECRET environment variable")
 
 
 def simulation_config_section():

@@ -20,6 +20,13 @@ from pathlib import Path
 from typing import List, Optional
 import yfinance as yf
 
+# Try to load .env file if it exists
+try:
+    from dotenv import load_dotenv
+    load_dotenv()  # Load environment variables from .env file
+except ImportError:
+    pass  # python-dotenv not installed, will use environment variables only
+
 logging.basicConfig(level=logging.INFO, format='%(levelname)s:%(name)s:%(message)s')
 logger = logging.getLogger(__name__)
 
