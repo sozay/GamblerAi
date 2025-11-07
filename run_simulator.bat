@@ -4,6 +4,16 @@ REM Start the Interactive Simulator on port 8503
 echo Starting Interactive Simulator on http://localhost:8503
 echo =======================================================
 echo.
+
+REM Check if port 8503 is already in use and kill it
+for /f "tokens=5" %%a in ('netstat -aon ^| find ":8503" ^| find "LISTENING"') do (
+    echo Warning: Port 8503 is already in use. Stopping existing process...
+    taskkill /F /PID %%a >nul 2>&1
+    timeout /t 2 /nobreak >nul
+    echo Stopped existing process
+    echo.
+)
+
 echo Features:
 echo   - Download historical data (up to 10 years)
 echo   - Select custom date ranges (7 days, 1 month, 1 year, etc.)
