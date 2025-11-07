@@ -21,7 +21,6 @@ import os
 # Add parent directory to path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from scripts.data_downloader import DataDownloader
 from scripts.simulation_race_live import LiveSimulationRace
 from gambler_ai.analysis.stock_scanner import ScannerType
 

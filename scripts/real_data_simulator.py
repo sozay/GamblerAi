@@ -1,8 +1,11 @@
 """
-Real Data Simulation Engine
+Real Data Simulation Engine - Alpaca API Only
 
-Uses actual downloaded market data to run simulations.
-NO synthetic data - only real price movements and actual strategy signals.
+Uses actual downloaded market data from Alpaca API to run simulations.
+- NO synthetic data generation
+- NO Yahoo Finance (removed)
+- Only real price movements from Alpaca
+- Only actual strategy signals based on real data
 """
 
 import pandas as pd
@@ -13,7 +16,6 @@ from pathlib import Path
 import logging
 import json
 
-from scripts.data_downloader import DataDownloader
 from gambler_ai.analysis.stock_scanner import StockScanner, ScannerType
 from gambler_ai.analysis.momentum_detector import MomentumDetector
 from gambler_ai.analysis.mean_reversion_detector import MeanReversionDetector
@@ -27,8 +29,12 @@ logger.setLevel(logging.INFO)
 
 class RealDataSimulator:
     """
-    Simulation engine using ONLY real market data.
-    Downloads and uses actual price data from Yahoo Finance.
+    Simulation engine using ONLY real market data from Alpaca API.
+
+    - Uses cached Alpaca data (downloaded via EnhancedDataDownloader)
+    - NO synthetic data generation
+    - NO Yahoo Finance
+    - Automatically adjusts simulation period to match available data
     """
 
     def __init__(
@@ -600,7 +606,8 @@ class RealDataSimulator:
             'total_weeks': self.total_weeks,
             'initial_capital': self.initial_capital,
             'combinations': results,
-            'data_source': 'REAL_MARKET_DATA_ONLY'
+            'data_source': 'ALPACA_API_ONLY',
+            'notes': 'No synthetic data, no Yahoo Finance - Alpaca API exclusively'
         }
 
         results_file = self.results_dir / 'live_results.json'

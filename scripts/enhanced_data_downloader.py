@@ -1,12 +1,19 @@
 #!/usr/bin/env python3
 """
-Enhanced Data Downloader with Alpaca Integration
+Enhanced Data Downloader - Alpaca API Only
 
-Downloads historical market data from multiple sources:
-- Yahoo Finance: Free, but limited to 7 days for 1-minute data
-- Alpaca: Requires API credentials, supports years of 1-minute data
+Downloads historical market data exclusively from Alpaca API.
+Yahoo Finance support has been removed.
 
-Data is saved to market_data_cache/ directory in parquet format.
+Features:
+- Alpaca: Full historical data access with API credentials
+- Supports all timeframes: 1Min, 5Min, 15Min, 1Hour, 1Day
+- Automatic pagination for large datasets
+- Data cached in market_data_cache/ directory in parquet format
+
+Requirements:
+- ALPACA_API_KEY configured in config.yaml
+- ALPACA_API_SECRET set as environment variable
 """
 
 import os
@@ -114,7 +121,10 @@ class EnhancedDataDownloader:
         interval: str = "1m"
     ) -> dict:
         """
-        Download data from Yahoo Finance.
+        DEPRECATED: Yahoo Finance support has been removed.
+
+        This method is no longer supported. Use download_alpaca() or download_auto() instead.
+        All data downloads now use Alpaca API exclusively.
 
         Args:
             symbols: List of stock symbols
@@ -123,74 +133,21 @@ class EnhancedDataDownloader:
             interval: Data interval (1m, 5m, 15m, 1h, 1d)
 
         Returns:
-            Dictionary mapping symbols to DataFrames
+            Empty dictionary (method disabled)
         """
-        logger.info("=" * 80)
-        logger.info("DOWNLOADING DATA FROM YAHOO FINANCE")
-        logger.info("=" * 80)
-        logger.info(f"Symbols: {', '.join(symbols)}")
-        logger.info(f"Period: {start_date.date()} to {end_date.date()}")
-        logger.info(f"Interval: {interval}")
-        logger.info("=" * 80)
-
-        results = {}
-
-        for symbol in symbols:
-            try:
-                logger.info(f"Downloading {symbol}...")
-
-                # Download data
-                ticker = yf.Ticker(symbol)
-                df = ticker.history(
-                    start=start_date,
-                    end=end_date,
-                    interval=interval,
-                    auto_adjust=True
-                )
-
-                if df.empty:
-                    logger.warning(f"No data returned for {symbol}")
-                    continue
-
-                # Reset index to get datetime as column
-                df.reset_index(inplace=True)
-
-                # Standardize column names
-                df.columns = [col.lower() for col in df.columns]
-
-                # Ensure timestamp column
-                timestamp_col = None
-                for possible_name in ['datetime', 'date', 'timestamp', 'index']:
-                    if possible_name in df.columns:
-                        timestamp_col = possible_name
-                        break
-
-                if timestamp_col and timestamp_col != 'timestamp':
-                    df.rename(columns={timestamp_col: 'timestamp'}, inplace=True)
-
-                if 'timestamp' not in df.columns:
-                    logger.error(f"Could not find timestamp column for {symbol}")
-                    continue
-
-                # Ensure timestamp is datetime
-                df['timestamp'] = pd.to_datetime(df['timestamp'])
-
-                # Keep only OHLCV columns
-                required_cols = ['timestamp', 'open', 'high', 'low', 'close', 'volume']
-                df = df[[col for col in required_cols if col in df.columns]]
-
-                # Save to cache
-                cache_file = self.cache_dir / f"{symbol}_{interval}_{start_date.strftime('%Y%m%d')}_{end_date.strftime('%Y%m%d')}.parquet"
-                df.to_parquet(cache_file, index=False)
-
-                results[symbol] = df
-                logger.info(f"✓ Downloaded {len(df)} bars for {symbol} -> {cache_file.name}")
-
-            except Exception as e:
-                logger.error(f"✗ Error downloading {symbol}: {e}")
-
-        logger.info(f"\nSuccessfully downloaded data for {len(results)}/{len(symbols)} symbols")
-        return results
+        logger.error("=" * 80)
+        logger.error("❌ YAHOO FINANCE SUPPORT REMOVED")
+        logger.error("=" * 80)
+        logger.error("The download_yahoo() method has been deprecated and disabled.")
+        logger.error("This system now uses Alpaca API exclusively for all data downloads.")
+        logger.error("")
+        logger.error("Please use one of these methods instead:")
+        logger.error("  - download_alpaca()  : Download directly from Alpaca")
+        logger.error("  - download_auto()    : Automatic data source selection (uses Alpaca)")
+        logger.error("")
+        logger.error("Make sure ALPACA_API_SECRET environment variable is set.")
+        logger.error("=" * 80)
+        return {}
 
     def download_alpaca(
         self,
@@ -419,16 +376,18 @@ class EnhancedDataDownloader:
 
 
 def main():
-    """Test the enhanced downloader."""
+    """Test the enhanced downloader - Alpaca only."""
     import argparse
 
-    parser = argparse.ArgumentParser(description="Download market data")
+    parser = argparse.ArgumentParser(
+        description="Download market data from Alpaca API (Yahoo Finance removed)"
+    )
     parser.add_argument("--symbols", required=True, help="Comma-separated symbols")
     parser.add_argument("--start", required=True, help="Start date (YYYY-MM-DD)")
     parser.add_argument("--end", required=True, help="End date (YYYY-MM-DD)")
     parser.add_argument("--interval", default="1m", help="Data interval (1m, 5m, 15m, 1h, 1d)")
-    parser.add_argument("--source", choices=['yahoo', 'alpaca', 'auto'], default='auto',
-                        help="Data source to use")
+    parser.add_argument("--source", choices=['alpaca', 'auto'], default='auto',
+                        help="Data source (alpaca=direct, auto=automatic selection, always uses Alpaca)")
 
     args = parser.parse_args()
 
@@ -438,14 +397,13 @@ def main():
 
     downloader = EnhancedDataDownloader()
 
-    if args.source == 'yahoo':
-        results = downloader.download_yahoo(symbols, start_date, end_date, args.interval)
-    elif args.source == 'alpaca':
+    if args.source == 'alpaca':
         # Convert interval to Alpaca timeframe
         interval_map = {'1m': '1Min', '5m': '5Min', '15m': '15Min', '1h': '1Hour', '1d': '1Day'}
         timeframe = interval_map.get(args.interval, args.interval)
         results = downloader.download_alpaca(symbols, start_date, end_date, timeframe)
     else:
+        # 'auto' mode - always uses Alpaca now
         results = downloader.download_auto(symbols, start_date, end_date, args.interval)
 
     print(f"\n✓ Downloaded data for {len(results)} symbols")
