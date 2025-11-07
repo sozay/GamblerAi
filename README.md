@@ -1,312 +1,231 @@
-# GamblerAI - Stock Momentum Analysis System
+# GamblerAI - Stock Momentum Trading System
 
-A Python-based application for analyzing stock market momentum patterns, identifying continuation and reversal probabilities, and optimizing entry points during significant price movements.
+A Python-based momentum trading system with adaptive strategies, backtesting capabilities, and live paper trading integration.
 
 ## Overview
 
-GamblerAI analyzes historical stock price movements to answer critical trading questions:
-- When a stock shows rapid price movement, how long will it continue?
-- What is the probability of reversal and at what percentage?
-- What are the optimal entry and exit points during momentum events?
+GamblerAI is a momentum trading system that:
+- Detects momentum patterns across multiple strategies (Mean Reversion, Smart Money, Adaptive)
+- Backtests strategies on historical data
+- Runs live paper trading via Alpaca API
+- Scans multiple stocks for trading opportunities
 
 ## Key Features
 
-- **Historical Data Analysis**: Collect and analyze minute-by-minute stock price data
-- **Momentum Detection**: Automatically identify significant price movements
-- **Pattern Recognition**: Classify momentum events by continuation/reversal behavior
-- **Statistical Analysis**: Calculate probabilities and expected values
-- **REST API**: Query analysis results programmatically
-- **Interactive Dashboard**: Visualize patterns and statistics
-- **CLI Tools**: Command-line interface for analysts
-
-## Architecture
-
-See [ARCHITECTURE.md](ARCHITECTURE.md) for detailed system design.
-
-### High-Level Components
-
-1. **Data Ingestion Layer**: Fetches historical stock data
-2. **Storage Layer**: TimescaleDB for time-series, PostgreSQL for analytics
-3. **Analysis Engine**: Detects momentum events and analyzes patterns
-4. **API Layer**: FastAPI REST endpoints
-5. **Dashboard**: Streamlit-based visualization
+- **6 Trading Strategies**: Mean Reversion, Smart Money, Volatility Breakout, News Event, Adaptive, Multi-Stock Scanner
+- **Backtesting Engine**: Test strategies on historical data with realistic market conditions
+- **Live Paper Trading**: Alpaca API integration for real-time paper trading
+- **Multi-Stock Scanner**: Scan and trade multiple stocks simultaneously
+- **Regime Detection**: Adapt strategies based on market conditions
+- **Performance Analytics**: Detailed metrics, Sharpe ratio, max drawdown analysis
 
 ## Quick Start
 
+See [docs/guides/PAPER_TRADING_SETUP.md](docs/guides/PAPER_TRADING_SETUP.md) for complete setup instructions.
+
 ### Prerequisites
 
-- Docker & Docker Compose (recommended)
-- OR: Python 3.11+, PostgreSQL 15+, Redis 7+
-
-### Option 1: Docker Setup (Recommended)
-
 ```bash
-# Clone the repository
-git clone <repository-url>
-cd GamblerAi
+# Required
+pip install pandas numpy requests pyyaml
 
-# Start all services
-docker-compose up -d
-
-# Check service status
-docker-compose ps
-
-# View logs
-docker-compose logs -f api
+# Sign up for free Alpaca Paper Trading account
+# https://alpaca.markets (get $100k paper money)
 ```
 
-Services will be available at:
-- API: http://localhost:8000
-- Dashboard: http://localhost:8501
-- Flower (Celery monitor): http://localhost:5555
-- API Docs: http://localhost:8000/docs
-
-### Option 2: Local Development Setup
+### Run Paper Trading
 
 ```bash
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
+# Set API credentials
+export ALPACA_API_KEY='your_key'
+export ALPACA_API_SECRET='your_secret'
 
-# Install dependencies
-pip install -r requirements.txt
-
-# Set up databases
-# Install PostgreSQL with TimescaleDB extension
-# Install Redis
-
-# Configure environment
-cp .env.example .env
-# Edit .env with your database credentials
-
-# Initialize databases
-python -m gambler_ai.storage.init_db
-
-# Run API server
-uvicorn gambler_ai.api.main:app --reload
-
-# Run Celery worker (in another terminal)
-celery -A gambler_ai.tasks worker --loglevel=info
-
-# Run dashboard (in another terminal)
-streamlit run gambler_ai/dashboard/app.py
+# Start paper trading (5-minute test)
+python3 scripts/alpaca_paper_trading.py \
+  --symbols AAPL,MSFT,GOOGL \
+  --duration 5 \
+  --interval 30
 ```
+
+That's it! The system will scan for momentum signals and place paper trades automatically.
 
 ## Usage
 
-### 1. Collect Historical Data
+### Paper Trading
 
 ```bash
-# Using CLI
-python -m gambler_ai.cli.analyzer collect \
-  --symbol AAPL \
-  --start 2024-01-01 \
-  --end 2024-12-31 \
-  --timeframe 5min
+# Quick test (5 minutes)
+python3 scripts/alpaca_paper_trading.py --duration 5 --symbols AAPL,MSFT
 
-# Or for multiple symbols
-python -m gambler_ai.cli.analyzer collect \
-  --symbols AAPL,MSFT,GOOGL \
-  --start 2024-01-01 \
-  --end 2024-12-31
+# Full session (1 hour)
+python3 scripts/alpaca_paper_trading.py --duration 60
+
+# Multiple stocks with custom interval
+python3 scripts/alpaca_paper_trading.py \
+  --symbols AAPL,MSFT,GOOGL,TSLA,NVDA \
+  --duration 30 \
+  --interval 60
 ```
 
-### 2. Run Analysis
+### Backtesting
 
 ```bash
-# Detect momentum events
-python -m gambler_ai.cli.analyzer detect-momentum \
-  --symbol AAPL \
-  --threshold 2.0 \
-  --window 5min
+# Run backtest on historical data
+python3 scripts/backtest_screening.py
 
-# Analyze patterns
-python -m gambler_ai.cli.analyzer analyze-patterns \
-  --symbol AAPL \
-  --output reports/aapl_patterns.json
+# Backtest specific scanner strategies
+python3 backtest_stock_scanners_multi_year.py
+
+# Debug scanner issues
+python3 debug_scanner_issues.py
 ```
 
-### 3. Query via API
+### Utilities
 
 ```bash
-# Get momentum events for a symbol
-curl http://localhost:8000/api/v1/momentum-events/AAPL?start=2024-01-01
+# Fetch historical data
+python3 scripts/fetch_alpaca_data.py --symbol AAPL --start 2024-01-01
 
-# Get pattern statistics
-curl http://localhost:8000/api/v1/patterns/statistics?timeframe=5min
+# Optimize strategy parameters
+python3 scripts/optimize_parameters.py
 
-# Get continuation probability
-curl -X POST http://localhost:8000/api/v1/predict/continuation \
-  -H "Content-Type: application/json" \
-  -d '{
-    "symbol": "AAPL",
-    "initial_move_pct": 2.5,
-    "volume_ratio": 3.0,
-    "timeframe": "5min"
-  }'
+# Visualize backtest results
+python3 scripts/visualize_backtest.py
 ```
-
-### 4. Use Dashboard
-
-Navigate to http://localhost:8501 to access the interactive dashboard.
-
-Features:
-- View recent momentum events
-- Explore pattern statistics
-- Analyze continuation/reversal probabilities
-- Screen for current momentum opportunities
 
 ## Project Structure
 
 ```
 GamblerAi/
-├── gambler_ai/              # Main application package
-│   ├── data_ingestion/      # Data collection modules
-│   ├── storage/             # Database models and interfaces
-│   ├── analysis/            # Analysis engine
-│   ├── api/                 # FastAPI application
-│   ├── cli/                 # Command-line tools
-│   ├── dashboard/           # Streamlit dashboard
-│   └── utils/               # Utilities and helpers
-├── tests/                   # Test suite
-├── scripts/                 # Utility scripts
-├── docs/                    # Documentation
-├── config.yaml              # Configuration
-├── docker-compose.yml       # Docker setup
-├── requirements.txt         # Python dependencies
-└── README.md                # This file
+├── gambler_ai/                      # Core package
+│   ├── analysis/                    # Trading strategies and detectors
+│   │   ├── momentum_detector.py     # Base momentum detection
+│   │   ├── mean_reversion_detector.py
+│   │   ├── smart_money_detector.py
+│   │   ├── adaptive_strategy.py     # Regime-based adaptation
+│   │   ├── stock_scanner.py         # Multi-stock scanner
+│   │   └── regime_detector.py       # Market regime detection
+│   ├── backtesting/                 # Backtest engine
+│   │   ├── backtest_engine.py       # Main engine
+│   │   ├── performance.py           # Metrics calculation
+│   │   └── trade.py                 # Trade management
+│   ├── data_ingestion/              # Data fetching
+│   └── utils/                       # Configuration & logging
+├── scripts/                         # Production scripts
+│   ├── alpaca_paper_trading.py      # Live paper trading
+│   ├── backtest_screening.py        # Main backtest system
+│   ├── fetch_alpaca_data.py         # Data fetching
+│   ├── optimize_parameters.py       # Parameter optimization
+│   └── visualize_backtest.py        # Performance charts
+├── docs/                            # Documentation
+│   ├── guides/                      # User guides
+│   ├── reference/                   # Technical docs
+│   ├── results/                     # Backtest reports
+│   └── archive/                     # Historical docs
+├── archive/                         # Archived experiments
+│   └── experimental-backtests/      # Old backtest scripts
+├── config.yaml                      # Strategy configuration
+└── requirements.txt                 # Dependencies
 ```
 
 ## Configuration
 
-Edit `config.yaml` to customize:
+Edit `config.yaml` to customize strategies:
 
 ```yaml
-analysis:
-  momentum_detection:
-    min_price_change_pct: 2.0   # Minimum % move to detect
-    min_volume_ratio: 2.0        # Volume spike threshold
-    window_minutes: 5            # Detection window
+strategies:
+  mean_reversion:
+    min_price_change_pct: 2.0
+    stop_loss_pct: 2.0
+    take_profit_pct: 4.0
+
+  smart_money:
+    volume_threshold: 2.0
+    momentum_threshold: 1.5
 
 stocks:
-  watchlist:
+  scanner_symbols:
     - AAPL
     - MSFT
-    # Add more symbols...
+    - GOOGL
+    - TSLA
+    - NVDA
+
+alpaca:
+  # Set via environment variables or .env file
+  api_key: ${ALPACA_API_KEY}
+  api_secret: ${ALPACA_API_SECRET}
+  paper_trading: true
 ```
 
-## API Documentation
+## Trading Strategies
 
-Once the API is running, visit:
-- Swagger UI: http://localhost:8000/docs
-- ReDoc: http://localhost:8000/redoc
+### 1. Mean Reversion
+Detects overbought/oversold conditions and trades the reversal.
 
-### Key Endpoints
+### 2. Smart Money
+Follows institutional money flows via volume and price action.
 
-```
-GET  /api/v1/momentum-events/{symbol}     # Historical momentum events
-GET  /api/v1/patterns/statistics          # Pattern statistics
-POST /api/v1/predict/continuation         # Continuation prediction
-GET  /api/v1/stocks/screener              # Current momentum screener
-POST /api/v1/analyze/backtest             # Backtest a strategy
-```
+### 3. Volatility Breakout
+Captures momentum from volatility expansion.
+
+### 4. News Event
+Trades momentum around scheduled events (earnings, Fed announcements).
+
+### 5. Adaptive Strategy
+Dynamically selects strategy based on detected market regime (bull/bear/ranging).
+
+### 6. Multi-Stock Scanner
+Scans multiple stocks simultaneously for momentum signals across all strategies.
 
 ## Development
 
 ### Running Tests
 
 ```bash
-# Run all tests
-pytest
-
-# Run with coverage
-pytest --cov=gambler_ai --cov-report=html
-
-# Run specific test
-pytest tests/unit/test_momentum_detector.py
+pytest tests/
 ```
 
-### Code Quality
+### Adding New Strategies
 
-```bash
-# Format code
-black gambler_ai/
+1. Create detector in `gambler_ai/analysis/`
+2. Inherit from base `MomentumDetector`
+3. Implement `detect_pattern()` method
+4. Add to `stock_scanner.py` strategies list
+5. Test with `scripts/backtest_screening.py`
 
-# Sort imports
-isort gambler_ai/
+## Documentation
 
-# Lint
-flake8 gambler_ai/
+- **[Setup Guide](docs/guides/PAPER_TRADING_SETUP.md)** - Complete setup instructions
+- **[Running Instructions](docs/guides/RUNNING_INSTRUCTIONS.md)** - How to run paper trading
+- **[Troubleshooting](docs/guides/TROUBLESHOOTING.md)** - Common issues and fixes
+- **[Architecture](docs/reference/ARCHITECTURE.md)** - System design details
+- **[Backtest Results](docs/results/FINAL_BACKTEST_RESULTS.md)** - Performance reports
 
-# Type check
-mypy gambler_ai/
-```
+## Current Status
 
-## Data Flow Example
+✅ **Implemented:**
+- 6 trading strategies with momentum detection
+- Comprehensive backtesting engine
+- Live Alpaca paper trading integration
+- Multi-stock scanner system
+- Regime detection and adaptive strategy selection
+- Performance analytics and visualization
 
-1. **Historical Analysis**:
-   ```
-   Data Collection → Event Detection → Pattern Analysis → Statistics → API/Dashboard
-   ```
-
-2. **Example Scenario**:
-   - Collect 1 year of 5-minute data for AAPL
-   - Detect all instances where price moved >2% in 5 minutes
-   - For each event, measure how long momentum continued
-   - Calculate: "When AAPL rises 2% in 5min, it continues rising for avg 15min with 65% probability"
-   - Store results for API queries
-
-## Performance Considerations
-
-- **Data Volume**: 1 year of 1-minute data for 100 stocks ≈ 25M rows
-- **Analysis Speed**: Process 1 year of data in ~30 minutes
-- **API Response**: <500ms for most queries (cached results)
-- **Database**: TimescaleDB provides 10-100x speedup for time-series queries
-
-## Roadmap
-
-### Phase 1: Foundation ✓
-- [x] Architecture design
-- [ ] Database setup
-- [ ] Data collection
-- [ ] Basic analysis engine
-
-### Phase 2: Core Features
-- [ ] Momentum detection
-- [ ] Pattern analysis
-- [ ] Statistical calculations
-- [ ] REST API
-
-### Phase 3: Interface
-- [ ] CLI tools
-- [ ] Dashboard
-- [ ] Visualization
-
-### Phase 4: Advanced
-- [ ] Real-time data
-- [ ] Machine learning models
-- [ ] Alert system
-- [ ] Strategy backtesting
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit changes (`git commit -m 'Add amazing feature'`)
-4. Push to branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
-
-## License
-
-[To be determined]
+📊 **Backtest Performance:**
+- Multi-year backtests completed (2019-2024)
+- Tested across bull, bear, and ranging markets
+- See `docs/results/` for detailed reports
 
 ## Support
 
 For questions or issues:
+- Review `docs/guides/TROUBLESHOOTING.md`
 - Open an issue on GitHub
-- Contact: [your-email@example.com]
 
-## Acknowledgments
+## Built With
 
-- Built with FastAPI, Pandas, TimescaleDB, and Streamlit
-- Market data provided by Yahoo Finance / Alpha Vantage
+- **Data**: Yahoo Finance, Alpaca Markets API
+- **Core**: Python, Pandas, NumPy
+- **Analysis**: Custom momentum detection algorithms
+- **Trading**: Alpaca Paper Trading API
