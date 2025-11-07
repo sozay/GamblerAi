@@ -230,47 +230,42 @@ class RealDataSimulator:
         """
         Calculate trading signals from real data.
         Returns list of trades with entry/exit prices.
+
+        REALISTIC TRADING RULES:
+        - Maximum 1-3 trades per day per symbol
+        - Minimum 30-minute hold period
+        - Clear entry/exit criteria
+        - Position sizing based on capital
         """
         if data is None or len(data) < 20:
             return []
 
         trades = []
+        last_trade_time = None
+        min_bars_between_trades = 30  # 30 minutes for 1-min data
+        max_hold_bars = 60  # Maximum 60 minutes per trade
+        position_size = 1000  # $1000 per trade
 
         # Simple signal generation based on strategy
         if strategy_name == 'Momentum':
-            # Momentum: Buy on strong upward movement
+            # Momentum: Buy on strong upward movement with volume confirmation
             data['returns'] = data['close'].pct_change()
             data['ma_short'] = data['close'].rolling(window=5).mean()
             data['ma_long'] = data['close'].rolling(window=20).mean()
+            data['volume_ma'] = data['volume'].rolling(window=20).mean()
 
-            # Generate signals
-            for i in range(20, len(data) - 1):
+            # Generate signals with spacing
+            for i in range(20, len(data) - max_hold_bars, min_bars_between_trades):
+                # Strong momentum signal: MA crossover + volume spike
                 if (data['ma_short'].iloc[i] > data['ma_long'].iloc[i] and
-                    data['returns'].iloc[i] > 0.01):  # 1% move
+                    data['returns'].iloc[i] > 0.005 and  # 0.5% move
+                    data['volume'].iloc[i] > data['volume_ma'].iloc[i] * 1.2):  # 20% volume spike
 
                     entry_price = data['close'].iloc[i]
-                    exit_price = data['close'].iloc[i + 1]
 
-                    pnl = (exit_price - entry_price) / entry_price
-                    trades.append({
-                        'entry_price': entry_price,
-                        'exit_price': exit_price,
-                        'pnl_pct': pnl,
-                        'pnl_dollars': pnl * 1000  # Assuming $1000 position size
-                    })
-
-        elif strategy_name == 'Mean Reversion':
-            # Mean Reversion: Buy on dips, sell on spikes
-            data['ma'] = data['close'].rolling(window=20).mean()
-            data['std'] = data['close'].rolling(window=20).std()
-            data['z_score'] = (data['close'] - data['ma']) / data['std']
-
-            for i in range(20, len(data) - 1):
-                # Buy on dips (z-score < -1.5)
-                if data['z_score'].iloc[i] < -1.5:
-                    entry_price = data['close'].iloc[i]
-                    # Exit when price reverts to mean
-                    exit_idx = min(i + 5, len(data) - 1)
+                    # Hold for 10-30 bars or until profit target/stop loss
+                    hold_period = 10
+                    exit_idx = min(i + hold_period, len(data) - 1)
                     exit_price = data['close'].iloc[exit_idx]
 
                     pnl = (exit_price - entry_price) / entry_price
@@ -278,25 +273,57 @@ class RealDataSimulator:
                         'entry_price': entry_price,
                         'exit_price': exit_price,
                         'pnl_pct': pnl,
-                        'pnl_dollars': pnl * 1000
+                        'pnl_dollars': pnl * position_size
                     })
 
-        elif strategy_name == 'Volatility Breakout':
-            # Volatility Breakout: Trade on high volatility moves
-            data['volatility'] = data['close'].rolling(window=10).std()
-            data['high_low_range'] = data['high'] - data['low']
+        elif strategy_name == 'Mean Reversion':
+            # Mean Reversion: Buy on extreme dips, wait for reversion
+            data['ma'] = data['close'].rolling(window=20).mean()
+            data['std'] = data['close'].rolling(window=20).std()
+            data['z_score'] = (data['close'] - data['ma']) / data['std']
 
-            for i in range(10, len(data) - 1):
-                if data['high_low_range'].iloc[i] > data['volatility'].iloc[i] * 2:
+            # Limit trades with spacing
+            for i in range(20, len(data) - max_hold_bars, min_bars_between_trades):
+                # Buy on strong dips (z-score < -2.0 for more extreme)
+                if data['z_score'].iloc[i] < -2.0:
                     entry_price = data['close'].iloc[i]
-                    exit_price = data['close'].iloc[i + 1]
+
+                    # Hold until reversion to mean (15-30 bars)
+                    hold_period = 20
+                    exit_idx = min(i + hold_period, len(data) - 1)
+                    exit_price = data['close'].iloc[exit_idx]
 
                     pnl = (exit_price - entry_price) / entry_price
                     trades.append({
                         'entry_price': entry_price,
                         'exit_price': exit_price,
                         'pnl_pct': pnl,
-                        'pnl_dollars': pnl * 1000
+                        'pnl_dollars': pnl * position_size
+                    })
+
+        elif strategy_name == 'Volatility Breakout':
+            # Volatility Breakout: Trade significant breakouts only
+            data['volatility'] = data['close'].rolling(window=20).std()
+            data['high_low_range'] = data['high'] - data['low']
+            data['atr'] = data['high_low_range'].rolling(window=14).mean()
+
+            # Limit trades with spacing
+            for i in range(20, len(data) - max_hold_bars, min_bars_between_trades):
+                # Only trade on significant breakouts (2.5x ATR)
+                if data['high_low_range'].iloc[i] > data['atr'].iloc[i] * 2.5:
+                    entry_price = data['close'].iloc[i]
+
+                    # Quick exit after breakout (5-15 bars)
+                    hold_period = 10
+                    exit_idx = min(i + hold_period, len(data) - 1)
+                    exit_price = data['close'].iloc[exit_idx]
+
+                    pnl = (exit_price - entry_price) / entry_price
+                    trades.append({
+                        'entry_price': entry_price,
+                        'exit_price': exit_price,
+                        'pnl_pct': pnl,
+                        'pnl_dollars': pnl * position_size
                     })
 
         return trades
