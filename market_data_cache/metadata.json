@@ -1,0 +1,19 @@
+{
+  "symbols": [
+    "AAPL",
+    "MSFT",
+    "GOOGL",
+    "AMZN",
+    "TSLA",
+    "NVDA",
+    "META",
+    "AMD",
+    "NFLX",
+    "SPY"
+  ],
+  "start_date": "2015-11-10T12:05:29.670015",
+  "end_date": "2025-11-07T12:05:29.670015",
+  "interval": "5m",
+  "download_timestamp": "2025-11-07T12:05:37.242021",
+  "data_summary": {}
+}
