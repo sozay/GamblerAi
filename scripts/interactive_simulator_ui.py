@@ -65,23 +65,22 @@ if 'simulation_results' not in st.session_state:
     st.session_state.simulation_results = None
 
 
-def check_data_availability(start_date: datetime, end_date: datetime, interval: str):
-    """Check if data exists for the requested period and interval."""
+def check_data_availability(start_date: datetime, end_date: datetime, interval: str, requested_symbols: list = None):
+    """Check if data exists for the requested period, interval, and symbols."""
     cache_dir = Path("market_data_cache")
 
     if not cache_dir.exists():
-        return False, []
+        return False, [], []
 
     # Check for parquet files with the specified interval
     pattern = f"*_{interval}_*.parquet"
     files = list(cache_dir.glob(pattern))
 
     if not files:
-        return False, []
+        return False, [], []
 
-    # Extract symbols from available files
-    symbols = []
-    data_exists = False
+    # Extract symbols that have data covering the requested period
+    available_symbols = []
 
     for file in files:
         try:
@@ -98,14 +97,21 @@ def check_data_availability(start_date: datetime, end_date: datetime, interval: 
 
                 # Check if file covers our range
                 if file_start <= pd.Timestamp(start_date) and file_end >= pd.Timestamp(end_date):
-                    data_exists = True
                     symbol = df['symbol'].iloc[0] if 'symbol' in df.columns else None
-                    if symbol and symbol not in symbols:
-                        symbols.append(symbol)
+                    if symbol and symbol not in available_symbols:
+                        available_symbols.append(symbol)
         except:
             continue
 
-    return data_exists, symbols
+    # If specific symbols were requested, check if all are available
+    if requested_symbols:
+        missing_symbols = [s for s in requested_symbols if s not in available_symbols]
+        all_available = len(missing_symbols) == 0
+        return all_available, available_symbols, missing_symbols
+    else:
+        # No specific symbols requested, just report what's available
+        data_exists = len(available_symbols) > 0
+        return data_exists, available_symbols, []
 
 
 def simulation_config_section():
@@ -243,15 +249,19 @@ def run_simulation_section(config):
     days = (config['end_date'] - config['start_date']).days
     weeks = days // 7
 
-    # Check if data exists
-    data_exists, existing_symbols = check_data_availability(
+    # Check if data exists for all requested symbols
+    data_exists, available_symbols, missing_symbols = check_data_availability(
         config['start_date'],
         config['end_date'],
-        config['interval']
+        config['interval'],
+        config['symbols']
     )
 
     if data_exists:
-        st.success(f"✅ Data available for {len(existing_symbols)} symbols at {config['interval']} interval")
+        st.success(f"✅ Data available for all {len(available_symbols)} symbols at {config['interval']} interval")
+    elif len(available_symbols) > 0:
+        st.info(f"ℹ️ Data available for {len(available_symbols)}/{len(config['symbols'])} symbols. Missing: {', '.join(missing_symbols)}")
+        st.info(f"💾 Missing symbols will be downloaded automatically when you start the simulation")
     else:
         st.info(f"ℹ️ Data will be downloaded automatically when you start the simulation")
 
@@ -275,18 +285,28 @@ def run_simulation_section(config):
         try:
             # Check and download data if needed
             if not data_exists:
-                status_text.markdown("### 📥 Downloading data...")
-                progress_bar.progress(10)
+                # Only download missing symbols
+                symbols_to_download = missing_symbols if missing_symbols else config['symbols']
 
-                from scripts.enhanced_data_downloader import EnhancedDataDownloader
+                if symbols_to_download:
+                    status_text.markdown(f"### 📥 Downloading data for {len(symbols_to_download)} symbol(s)...")
+                    if len(symbols_to_download) < len(config['symbols']):
+                        status_text.markdown(f"**Downloading:** {', '.join(symbols_to_download)}")
+                        status_text.markdown(f"**Using cached:** {', '.join(available_symbols)}")
 
-                downloader = EnhancedDataDownloader()
-                data = downloader.download_auto(
-                    symbols=config['symbols'],
-                    start_date=config['start_date'],
-                    end_date=config['end_date'],
-                    interval=config['interval']
-                )
+                    progress_bar.progress(10)
+
+                    from scripts.enhanced_data_downloader import EnhancedDataDownloader
+
+                    downloader = EnhancedDataDownloader()
+                    data = downloader.download_auto(
+                        symbols=symbols_to_download,
+                        start_date=config['start_date'],
+                        end_date=config['end_date'],
+                        interval=config['interval']
+                    )
+                else:
+                    data = True  # All data already exists
 
                 if not data:
                     is_intraday = config['interval'] in ["1m", "5m", "15m", "1h"]
@@ -312,7 +332,8 @@ def run_simulation_section(config):
                     st.session_state.simulation_running = False
                     return
 
-                st.success(f"✅ Downloaded {config['interval']} data for {len(data)} symbols!")
+                if data and symbols_to_download:
+                    st.success(f"✅ Downloaded {config['interval']} data for {len(data)} symbol(s)!")
                 progress_bar.progress(30)
 
             # Use REAL DATA SIMULATOR - NO synthetic data!
