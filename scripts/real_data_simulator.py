@@ -149,33 +149,36 @@ class RealDataSimulator:
 
                     if 'timestamp' in df.columns:
                         df['timestamp'] = pd.to_datetime(df['timestamp'])
+
+                        # Normalize timezone: convert all to UTC for consistency
+                        if not pd.api.types.is_datetime64tz_dtype(df['timestamp']):
+                            # Timezone-naive data (from Yahoo) - assume it's US Eastern time
+                            df['timestamp'] = df['timestamp'].dt.tz_localize('America/New_York')
+                            logger.debug(f"Localized timezone-naive data to America/New_York")
+
+                        # Convert all to UTC for consistent comparison
+                        df['timestamp'] = df['timestamp'].dt.tz_convert('UTC')
+
                         symbol_dfs.append(df)
                         logger.info(f"Loaded {len(df)} rows from {cache_file.name}")
                 except Exception as e:
                     logger.error(f"Error loading {cache_file}: {e}")
 
             if symbol_dfs:
-                # Combine and sort by timestamp
+                # Combine and sort by timestamp (all data is now in UTC)
                 combined_df = pd.concat(symbol_dfs, ignore_index=True)
                 combined_df = combined_df.sort_values('timestamp')
                 combined_df = combined_df.drop_duplicates(subset=['timestamp'], keep='last')
 
                 # Filter to our date range
-                # Handle timezone-aware timestamps by converting dates to timezone-aware
-                if pd.api.types.is_datetime64tz_dtype(combined_df['timestamp']):
-                    # Data has timezone, localize our dates to match
-                    tz = combined_df['timestamp'].dt.tz
-                    start_date_tz = pd.Timestamp(self.start_date).tz_localize(tz)
-                    end_date_tz = pd.Timestamp(self.end_date).tz_localize(tz)
-                    logger.info(f"Data has timezone {tz}, localizing filter dates")
-                else:
-                    # Data is timezone-naive, use as-is
-                    start_date_tz = self.start_date
-                    end_date_tz = self.end_date
+                # Convert user-selected dates to UTC for comparison
+                start_date_utc = pd.Timestamp(self.start_date).tz_localize('America/New_York').tz_convert('UTC')
+                end_date_utc = pd.Timestamp(self.end_date).tz_localize('America/New_York').tz_convert('UTC')
+                logger.info(f"Filtering data: {start_date_utc} to {end_date_utc} (UTC)")
 
                 combined_df = combined_df[
-                    (combined_df['timestamp'] >= start_date_tz) &
-                    (combined_df['timestamp'] <= end_date_tz)
+                    (combined_df['timestamp'] >= start_date_utc) &
+                    (combined_df['timestamp'] <= end_date_utc)
                 ]
 
                 if len(combined_df) > 0:
@@ -208,16 +211,11 @@ class RealDataSimulator:
 
         df = self.market_data[symbol]
 
-        # Handle timezone-aware timestamps
-        if pd.api.types.is_datetime64tz_dtype(df['timestamp']):
-            tz = df['timestamp'].dt.tz
-            start_tz = pd.Timestamp(start).tz_localize(tz)
-            end_tz = pd.Timestamp(end).tz_localize(tz)
-        else:
-            start_tz = start
-            end_tz = end
+        # All data is now in UTC, convert week dates to UTC for comparison
+        start_utc = pd.Timestamp(start).tz_localize('America/New_York').tz_convert('UTC')
+        end_utc = pd.Timestamp(end).tz_localize('America/New_York').tz_convert('UTC')
 
-        week_df = df[(df['timestamp'] >= start_tz) & (df['timestamp'] <= end_tz)].copy()
+        week_df = df[(df['timestamp'] >= start_utc) & (df['timestamp'] <= end_utc)].copy()
 
         return week_df if len(week_df) > 0 else None
 
