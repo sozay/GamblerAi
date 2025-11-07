@@ -368,12 +368,10 @@ class EnhancedDataDownloader:
         interval: str = "1m"
     ) -> dict:
         """
-        Automatically choose best data source based on date range and availability.
+        Download data from Alpaca ONLY.
 
-        Rules:
-        - Yahoo Finance: Only supports up to 60 days for intraday data (1m, 5m, 15m, 1h)
-        - Alpaca: Required for intraday data > 60 days or 1m data > 7 days
-        - Daily data (1d): Yahoo Finance works for any period
+        This method now exclusively uses Alpaca API for all data downloads.
+        Yahoo Finance is no longer used.
 
         Args:
             symbols: List of stock symbols
@@ -395,34 +393,26 @@ class EnhancedDataDownloader:
             "1d": "1Day"
         }
 
-        # Determine best source
-        is_intraday = interval in ["1m", "5m", "15m", "1h"]
+        # Always use Alpaca
+        if not self.alpaca_headers:
+            logger.error("=" * 80)
+            logger.error("❌ ALPACA CREDENTIALS REQUIRED")
+            logger.error("=" * 80)
+            logger.error("This system now uses Alpaca API exclusively for data downloads.")
+            logger.error("Yahoo Finance support has been removed.")
+            logger.error("")
+            logger.error("💡 To fix this:")
+            logger.error("1. Set ALPACA_API_SECRET environment variable")
+            logger.error("2. Ensure ALPACA_API_KEY is configured in config.yaml")
+            logger.error("")
+            logger.error("Example:")
+            logger.error("  export ALPACA_API_SECRET='your-secret-key'")
+            logger.error("=" * 80)
+            return {}
 
-        if is_intraday and days > 60:
-            # Yahoo Finance has 60-day limit for intraday data - must use Alpaca
-            if self.alpaca_headers:
-                logger.info(f"Using Alpaca for {days}-day period with {interval} data (Yahoo limit: 60 days)")
-                timeframe = interval_map.get(interval, "1Min")
-                return self.download_alpaca(symbols, start_date, end_date, timeframe)
-            else:
-                logger.error(f"❌ Yahoo Finance only supports 60 days of intraday data, but {days} days requested")
-                logger.error("❌ Alpaca credentials required for periods > 60 days")
-                logger.error("💡 Set ALPACA_API_SECRET environment variable or use daily (1d) interval")
-                return {}
-        elif interval == "1m" and days > 7:
-            # Yahoo Finance has 7-day limit for 1-minute data - prefer Alpaca
-            if self.alpaca_headers:
-                logger.info(f"Using Alpaca for {days}-day period with 1-minute data")
-                timeframe = "1Min"
-                return self.download_alpaca(symbols, start_date, end_date, timeframe)
-            else:
-                logger.warning(f"Yahoo Finance only supports 7 days of 1-minute data, but {days} days requested")
-                logger.warning("Using Yahoo Finance anyway - data may be limited")
-                return self.download_yahoo(symbols, start_date, end_date, interval)
-        else:
-            # Yahoo Finance is sufficient for daily data or short intraday periods
-            logger.info(f"Using Yahoo Finance for {days}-day period")
-            return self.download_yahoo(symbols, start_date, end_date, interval)
+        logger.info(f"Using Alpaca API for {days}-day period with {interval} data")
+        timeframe = interval_map.get(interval, "1Min")
+        return self.download_alpaca(symbols, start_date, end_date, timeframe)
 
 
 def main():

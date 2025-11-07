@@ -194,6 +194,75 @@ class RealDataSimulator:
         else:
             logger.info(f"Successfully loaded data for {len(self.market_data)} symbols")
 
+            # CRITICAL FIX: Detect actual data date range and adjust simulation period
+            self._adjust_date_range_to_data()
+
+    def _adjust_date_range_to_data(self):
+        """
+        CRITICAL FIX: Adjust simulation date range to match actual data availability.
+
+        This fixes the issue where user requests a 1-year period but data only covers
+        recent months, causing weeks of empty trading until data starts.
+        """
+        if not self.market_data:
+            return
+
+        # Find the actual min and max timestamps across all loaded data
+        all_min_dates = []
+        all_max_dates = []
+
+        for symbol, df in self.market_data.items():
+            if len(df) > 0 and 'timestamp' in df.columns:
+                all_min_dates.append(df['timestamp'].min())
+                all_max_dates.append(df['timestamp'].max())
+
+        if not all_min_dates or not all_max_dates:
+            logger.warning("No timestamp data found in loaded market data")
+            return
+
+        # Get the actual data range (timezone-aware)
+        actual_start = min(all_min_dates)
+        actual_end = max(all_max_dates)
+
+        # Convert to timezone-naive datetime for comparison
+        if pd.api.types.is_datetime64tz_dtype(actual_start):
+            actual_start = actual_start.tz_convert('America/New_York').tz_localize(None)
+            actual_end = actual_end.tz_convert('America/New_York').tz_localize(None)
+
+        actual_start = actual_start.to_pydatetime()
+        actual_end = actual_end.to_pydatetime()
+
+        # Compare with requested range
+        requested_days = (self.end_date - self.start_date).days
+        actual_days = (actual_end - actual_start).days
+
+        logger.info("=" * 80)
+        logger.info("DATA RANGE VALIDATION")
+        logger.info("=" * 80)
+        logger.info(f"Requested range: {self.start_date.date()} to {self.end_date.date()} ({requested_days} days)")
+        logger.info(f"Actual data range: {actual_start.date()} to {actual_end.date()} ({actual_days} days)")
+
+        # If actual data range is significantly different, adjust simulation period
+        if actual_start > self.start_date or actual_end < self.end_date:
+            logger.warning("⚠️  DATA RANGE MISMATCH DETECTED!")
+            logger.warning(f"   Requested data from {self.start_date.date()} but data starts at {actual_start.date()}")
+            logger.warning(f"   Adjusting simulation to match actual data availability...")
+
+            # Adjust to actual data range
+            self.start_date = actual_start
+            self.end_date = actual_end
+
+            # Regenerate weekly periods with correct dates
+            self.weekly_periods = self._generate_weekly_periods()
+            self.total_weeks = len(self.weekly_periods)
+
+            logger.info(f"✓ Adjusted simulation: {self.start_date.date()} to {self.end_date.date()}")
+            logger.info(f"✓ New total weeks: {self.total_weeks}")
+        else:
+            logger.info("✓ Data range matches requested range")
+
+        logger.info("=" * 80)
+
     def _generate_weekly_periods(self) -> List[Tuple[datetime, datetime]]:
         """Generate weekly trading periods."""
         periods = []
