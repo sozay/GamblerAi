@@ -243,13 +243,13 @@ class RealDataSimulator:
         trades = []
         last_trade_time = None
 
-        # OPTIMIZED PARAMETERS (from backtesting on 2024-11-08 to 2025-11-07)
-        # These settings achieved +9.89% return on 1h data
-        min_bars_between_trades = 6  # Minimum 6 bars between trades
+        # OPTIMIZED PARAMETERS (for 1h weekly trading)
+        # Adjusted for shorter weekly data slices
+        min_bars_between_trades = 3  # Reduced from 6 to allow more trades per week
 
         # Dynamic max_hold_bars based on available data
-        available_bars = len(data) - 20  # Bars available after warmup
-        max_hold_bars = min(15, max(8, available_bars // 3))  # Allow longer holds
+        available_bars = len(data) - 14  # Reduced warmup period
+        max_hold_bars = min(12, max(6, available_bars // 4))  # Shorter holds for weekly data
 
         # Position size: 100% OF CAPITAL (ALL IN - VERY AGGRESSIVE!)
         # If capital is $100k, trade with $100k. If $10k, trade with $10k.
@@ -362,9 +362,9 @@ class RealDataSimulator:
             data['atr'] = data['high_low_range'].rolling(window=14).mean()
 
             # Limit trades with spacing
-            for i in range(20, len(data) - max_hold_bars, min_bars_between_trades):
-                # OPTIMIZED: More sensitive to breakouts (1.5x ATR instead of 2.0x)
-                if data['high_low_range'].iloc[i] > data['atr'].iloc[i] * 1.5:
+            for i in range(14, len(data) - max_hold_bars, min_bars_between_trades):
+                # OPTIMIZED: More sensitive to breakouts (1.2x ATR for 1h data)
+                if data['high_low_range'].iloc[i] > data['atr'].iloc[i] * 1.2:
                     entry_price = data['close'].iloc[i]
 
                     # Simulate holding with stop loss and take profit
@@ -425,7 +425,7 @@ class RealDataSimulator:
         for symbol in self.symbols:
             week_data = self._get_week_data(symbol, week_start, week_end)
 
-            if week_data is None or len(week_data) < 20:
+            if week_data is None or len(week_data) < 14:
                 continue
 
             # Calculate metrics for this stock

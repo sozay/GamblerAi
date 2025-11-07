@@ -75,9 +75,9 @@ def calculate_volatility_breakout_signals(data: pd.DataFrame, position_size: flo
 
     trades = []
 
-    # Optimized parameters from real_data_simulator.py
-    min_bars_between_trades = 6
-    max_hold_bars = 15
+    # Optimized parameters (adjusted for weekly 1h data)
+    min_bars_between_trades = 3  # Reduced for more opportunities
+    max_hold_bars = 12  # Shorter for weekly slices
     stop_loss_pct = 0.02
     take_profit_pct = 0.04
 
@@ -88,9 +88,9 @@ def calculate_volatility_breakout_signals(data: pd.DataFrame, position_size: flo
     data['atr'] = data['high_low_range'].rolling(window=14).mean()
 
     # Generate signals
-    for i in range(20, len(data) - max_hold_bars, min_bars_between_trades):
-        # Breakout condition: high-low range > 1.5x ATR
-        if data['high_low_range'].iloc[i] > data['atr'].iloc[i] * 1.5:
+    for i in range(14, len(data) - max_hold_bars, min_bars_between_trades):
+        # Breakout condition: high-low range > 1.2x ATR (more sensitive)
+        if data['high_low_range'].iloc[i] > data['atr'].iloc[i] * 1.2:
             entry_price = data['close'].iloc[i]
             entry_time = data['timestamp'].iloc[i]
 
@@ -166,7 +166,7 @@ def select_stocks_by_scanner(
         end_utc = pd.Timestamp(week_end).tz_localize('America/New_York').tz_convert('UTC')
         week_df = df[(df['timestamp'] >= start_utc) & (df['timestamp'] <= end_utc)].copy()
 
-        if len(week_df) < 20:
+        if len(week_df) < 14:
             continue
 
         try:
@@ -273,7 +273,7 @@ def simulate_combination(
             end_utc = pd.Timestamp(week_end).tz_localize('America/New_York').tz_convert('UTC')
             week_df = df[(df['timestamp'] >= start_utc) & (df['timestamp'] <= end_utc)].copy()
 
-            if len(week_df) < 20:
+            if len(week_df) < 14:
                 continue
 
             # Calculate signals
