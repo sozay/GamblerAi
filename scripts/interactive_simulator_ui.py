@@ -112,10 +112,10 @@ def download_data_section():
 
         st.markdown("### 📥 Download Additional Data")
 
-        col1, col2 = st.columns(2)
+        col1, col2, col3 = st.columns(3)
 
         with col1:
-            st.markdown("**Download 1-Minute Data (Last 7 Days)**")
+            st.markdown("**Yahoo Finance (7 Days Max)**")
             st.info("⚠️ Yahoo Finance only provides 1-minute data for the last 7 days")
 
             if st.button("📊 Download 7-Day 1-Min Data", key="download_1min"):
@@ -143,12 +143,43 @@ def download_data_section():
                         st.error("❌ Failed to download 1-minute data")
 
         with col2:
-            st.markdown("**Re-download Full Historical Data**")
+            st.markdown("**Alpaca (1+ Months)**")
+            st.info("✨ Alpaca provides extended historical 1-minute data")
+
+            alpaca_days = st.slider("Days of data", 7, 90, 30, key="alpaca_days", help="Download 1-minute data for up to 90 days")
+
+            if st.button("🚀 Download Alpaca Data", key="download_alpaca"):
+                with st.spinner(f"Downloading {alpaca_days} days of 1-minute data from Alpaca..."):
+                    from datetime import datetime, timedelta
+                    from scripts.enhanced_data_downloader import EnhancedDataDownloader
+
+                    # Download from Alpaca
+                    end_date = datetime.now()
+                    start_date = end_date - timedelta(days=alpaca_days)
+
+                    symbols = metadata['symbols']
+                    downloader = EnhancedDataDownloader()
+                    data = downloader.download_alpaca(
+                        symbols=symbols,
+                        start_date=start_date,
+                        end_date=end_date,
+                        timeframe="1Min"
+                    )
+
+                    if data:
+                        st.success(f"✅ Downloaded 1-minute data for {len(data)} symbols from Alpaca!")
+                        st.info(f"📅 Period: {start_date.date()} to {end_date.date()}")
+                        st.rerun()
+                    else:
+                        st.error("❌ Failed to download data from Alpaca. Check ALPACA_API_SECRET environment variable.")
+
+        with col3:
+            st.markdown("**Re-download Full Historical**")
 
             new_years = st.slider("Years", 1, 10, 10, key="redownload_years")
             new_interval = st.selectbox("Interval", ["1d", "1h", "15m", "5m"], key="redownload_interval")
 
-            if st.button("🔄 Re-download Data", key="redownload"):
+            if st.button("🔄 Re-download", key="redownload"):
                 with st.spinner(f"Downloading {new_years} years of {new_interval} data..."):
                     downloader = DataDownloader()
 
