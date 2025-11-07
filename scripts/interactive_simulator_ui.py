@@ -141,9 +141,17 @@ def simulation_config_section():
             help="1m=1 minute, 5m=5 minutes, 1h=1 hour, 1d=1 day"
         )
 
-    # Show selected period
+    # Show selected period and validate
     days_selected = (end_date - start_date).days
     st.info(f"📊 Selected period: **{start_date}** to **{end_date}** ({days_selected} days, ~{days_selected//7} weeks)")
+
+    # Validate data availability based on interval and date range
+    is_intraday = interval in ["1m", "5m", "15m", "1h"]
+    if is_intraday and days_selected > 60:
+        st.warning(f"⚠️ **Yahoo Finance Limitation:** Intraday data ({interval}) is limited to 60 days, but you selected {days_selected} days.")
+        st.info("💡 **Solution:** Alpaca API credentials are required for periods > 60 days. Make sure ALPACA_API_SECRET environment variable is set.")
+    elif interval == "1m" and days_selected > 7:
+        st.info("ℹ️ For 1-minute data > 7 days, Alpaca API will be used (Yahoo Finance limit: 7 days)")
 
     # Symbols selection
     symbols_input = st.text_input(
@@ -281,8 +289,26 @@ def run_simulation_section(config):
                 )
 
                 if not data:
-                    st.error("❌ Failed to download data. Check your Alpaca credentials or try a shorter period.")
-                    st.info("💡 Tip: For Alpaca data, set ALPACA_API_SECRET environment variable")
+                    is_intraday = config['interval'] in ["1m", "5m", "15m", "1h"]
+                    days = (config['end_date'] - config['start_date']).days
+
+                    st.error("❌ Failed to download data")
+
+                    if is_intraday and days > 60:
+                        st.error(f"**Yahoo Finance Limitation:** Cannot download {config['interval']} data for {days} days (limit: 60 days)")
+                        st.info("**💡 Solutions:**")
+                        st.info("1. Set ALPACA_API_SECRET environment variable to use Alpaca API")
+                        st.info(f"2. Reduce the period to 60 days or less")
+                        st.info("3. Use daily (1d) interval instead (no limit)")
+                    elif config['interval'] == "1m" and days > 7:
+                        st.error(f"**Yahoo Finance Limitation:** Cannot download 1m data for {days} days (limit: 7 days)")
+                        st.info("**💡 Solutions:**")
+                        st.info("1. Set ALPACA_API_SECRET environment variable")
+                        st.info("2. Reduce the period to 7 days or less")
+                        st.info("3. Use 5m, 15m, 1h, or 1d interval instead")
+                    else:
+                        st.info("💡 Check your Alpaca credentials or try a shorter period")
+
                     st.session_state.simulation_running = False
                     return
 
