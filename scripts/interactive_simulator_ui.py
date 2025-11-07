@@ -108,7 +108,7 @@ def download_data_section():
                 })
 
             df = pd.DataFrame(summary_data)
-            st.dataframe(df, use_container_width=True, hide_index=True)
+            st.dataframe(df, width='stretch', hide_index=True)
 
         st.markdown("### 📥 Download Additional Data")
 
@@ -372,7 +372,7 @@ def run_simulation_section(config):
 
             from scripts.simulation_race_live import LiveSimulationRace
 
-            # Create simulator
+            # Create simulator with actual date range (not just years)
             simulator = LiveSimulationRace(
                 initial_capital=config['initial_capital'],
                 start_year=config['start_date'].year,
@@ -380,8 +380,16 @@ def run_simulation_section(config):
                 chart_update_interval=config['update_interval']
             )
 
+            # Override the date range to use actual selected dates
+            simulator.start_date = config['start_date']
+            simulator.end_date = config['end_date']
+            simulator.weekly_periods = simulator._generate_weekly_periods()
+
             # Clear any old results first
             st.session_state.simulation_results = None
+
+            # Calculate actual weeks from the updated simulator
+            actual_weeks = len(simulator.weekly_periods)
 
             # Show clear status message
             status_text.markdown(f"""
@@ -389,11 +397,11 @@ def run_simulation_section(config):
 
             **Period:** {config['start_date'].date()} to {config['end_date'].date()}
 
-            **Total weeks to simulate:** {weeks}
+            **Total weeks to simulate:** {actual_weeks}
 
-            **This will take approximately {weeks // 20}-{weeks // 10} minutes.**
+            **This will take approximately {max(1, actual_weeks // 20)}-{max(1, actual_weeks // 10)} minutes.**
 
-            The simulation is processing real market data week by week.
+            The simulation is processing week by week.
             Please wait for completion - results will appear automatically below.
 
             You can monitor progress in the terminal/console output.
@@ -491,7 +499,7 @@ def results_section():
             yaxis_title="Cumulative P&L ($)",
         )
 
-        st.plotly_chart(fig, use_container_width=True)
+        st.plotly_chart(fig, use_container_width=True)  # Will update to width='stretch' in future
 
     with tab2:
         # Rankings table
@@ -510,7 +518,7 @@ def results_section():
         df = df.sort_values('Return %', ascending=False)
         df.insert(0, 'Rank', range(1, len(df) + 1))
 
-        st.dataframe(df, use_container_width=True, hide_index=True)
+        st.dataframe(df, width='stretch', hide_index=True)
 
 
 def main():
