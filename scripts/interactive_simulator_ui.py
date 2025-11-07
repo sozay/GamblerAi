@@ -1,10 +1,10 @@
 """
 Interactive Simulation UI
 
-Allows users to:
-- Select date ranges
+Simplified version:
+- Select date ranges and interval
 - Choose scanners and strategies
-- Run simulations on-demand
+- Data is downloaded automatically if needed
 - View results in real-time
 """
 
@@ -63,47 +63,30 @@ if 'simulation_running' not in st.session_state:
     st.session_state.simulation_running = False
 if 'simulation_results' not in st.session_state:
     st.session_state.simulation_results = None
-if 'data_downloaded' not in st.session_state:
-    st.session_state.data_downloaded = False
 
 
-def check_data_availability():
-    """Check if historical data is available."""
+def check_data_availability(start_date: datetime, end_date: datetime, interval: str):
+    """Check if data exists for the requested period and interval."""
     cache_dir = Path("market_data_cache")
-    metadata_file = cache_dir / "metadata.json"
 
-    if not metadata_file.exists():
-        return None
-
-    with open(metadata_file, 'r') as f:
-        metadata = json.load(f)
-
-    return metadata
-
-
-def check_existing_data(days: int, interval: str) -> bool:
-    """Check if data already exists for the requested period."""
-    from datetime import datetime, timedelta
-
-    cache_dir = Path("market_data_cache")
     if not cache_dir.exists():
-        return False
+        return False, []
 
-    end_date = datetime.now()
-    start_date = end_date - timedelta(days=days)
-
-    # Check for any parquet files in the date range
+    # Check for parquet files with the specified interval
     pattern = f"*_{interval}_*.parquet"
     files = list(cache_dir.glob(pattern))
 
     if not files:
-        return False
+        return False, []
 
-    # Check if files cover the requested date range
+    # Extract symbols from available files
+    symbols = []
+    data_exists = False
+
     for file in files:
         try:
             df = pd.read_parquet(file)
-            if 'timestamp' in df.columns:
+            if 'timestamp' in df.columns and 'symbol' in df.columns:
                 df['timestamp'] = pd.to_datetime(df['timestamp'])
                 file_start = df['timestamp'].min()
                 file_end = df['timestamp'].max()
@@ -115,166 +98,60 @@ def check_existing_data(days: int, interval: str) -> bool:
 
                 # Check if file covers our range
                 if file_start <= pd.Timestamp(start_date) and file_end >= pd.Timestamp(end_date):
-                    return True
+                    data_exists = True
+                    symbol = df['symbol'].iloc[0] if 'symbol' in df.columns else None
+                    if symbol and symbol not in symbols:
+                        symbols.append(symbol)
         except:
             continue
 
-    return False
-
-
-def download_data_section():
-    """Data download section."""
-    st.markdown("## 📥 Step 1: Download Historical Data")
-
-    metadata = check_data_availability()
-
-    if metadata:
-        st.success("✅ Historical data available! Scroll down to Step 2 to select your custom date range.")
-
-        col1, col2, col3 = st.columns(3)
-        col1.metric("Symbols", len(metadata['symbols']))
-        col2.metric("Data Available From", metadata['start_date'][:10])
-        col3.metric("Data Available To", metadata['end_date'][:10])
-
-        with st.expander("📊 View Data Summary"):
-            summary_data = []
-            for symbol, info in metadata['data_summary'].items():
-                summary_data.append({
-                    'Symbol': symbol,
-                    'Rows': info['rows'],
-                    'Start': info['start'][:10],
-                    'End': info['end'][:10]
-                })
-
-            df = pd.DataFrame(summary_data)
-            st.dataframe(df, width='stretch', hide_index=True)
-
-        st.markdown("### 📥 Download More Data")
-
-    # Simple unified download form
-    col1, col2, col3 = st.columns([2, 2, 1])
-
-    with col1:
-        days = st.number_input("Days of history", min_value=1, max_value=365, value=30, step=1,
-                               help="Number of days to download (1-365)")
-
-    with col2:
-        interval = st.selectbox(
-            "Interval",
-            ["1m", "5m", "15m", "1h", "1d"],
-            index=0,
-            help="1m=1 minute, 5m=5 minutes, 1h=1 hour, 1d=1 day"
-        )
-
-    with col3:
-        st.markdown("<br>", unsafe_allow_html=True)
-        download_clicked = st.button("📥 Download", type="primary")
-
-    # Get symbols from metadata or use default
-    if metadata:
-        symbols = metadata['symbols']
-    else:
-        symbols_input = st.text_input(
-            "Symbols (comma-separated)",
-            "AAPL,MSFT,GOOGL,AMZN,TSLA,NVDA,META,AMD,NFLX,SPY"
-        )
-        symbols = [s.strip().upper() for s in symbols_input.split(',')]
-
-    # Download data
-    if download_clicked:
-        # Check if data already exists
-        if check_existing_data(days, interval):
-            st.info(f"ℹ️ Data for {days} days at {interval} interval already exists. Skipping download.")
-        else:
-            with st.spinner(f"Downloading {days} days of {interval} data for {len(symbols)} symbols..."):
-                from datetime import datetime, timedelta
-                from scripts.enhanced_data_downloader import EnhancedDataDownloader
-
-                end_date = datetime.now()
-                start_date = end_date - timedelta(days=days)
-
-                # Use enhanced downloader with auto source selection
-                downloader = EnhancedDataDownloader()
-                data = downloader.download_auto(
-                    symbols=symbols,
-                    start_date=start_date,
-                    end_date=end_date,
-                    interval=interval
-                )
-
-                if data:
-                    st.success(f"✅ Downloaded {interval} data for {len(data)} symbols!")
-                    st.info(f"📅 Period: {start_date.date()} to {end_date.date()}")
-                    st.rerun()
-                else:
-                    st.error("❌ Failed to download data. Check your Alpaca credentials or try a shorter period.")
-                    st.info("💡 Tip: For Alpaca data, set ALPACA_API_SECRET environment variable")
+    return data_exists, symbols
 
 
 def simulation_config_section():
     """Simulation configuration section."""
-    st.markdown("## ⚙️ Step 2: Configure Simulation")
+    st.markdown("## ⚙️ Configure Simulation")
 
-    metadata = check_data_availability()
+    # Date range and interval selection
+    st.markdown("### 📅 Select Date Range and Interval")
 
-    if not metadata:
-        st.warning("⚠️ Please download data first")
-        return None
-
-    # Date range selection
-    st.markdown("### 📅 Select Time Period for Your Simulation")
-    st.markdown(f"**Available data range:** {metadata['start_date'][:10]} to {metadata['end_date'][:10]}")
-
-    min_date = datetime.fromisoformat(metadata['start_date'])
-    max_date = datetime.fromisoformat(metadata['end_date'])
-
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
 
     with col1:
         start_date = st.date_input(
-            "📍 Simulation Start Date",
-            value=max_date - timedelta(days=365),  # Default: last 1 year
-            min_value=min_date.date(),
-            max_value=max_date.date(),
-            help=f"Select any date from {min_date.date()} to {max_date.date()}"
+            "📍 Start Date",
+            value=datetime.now().date() - timedelta(days=30),
+            max_value=datetime.now().date(),
+            help="Select the start date for your simulation"
         )
 
     with col2:
         end_date = st.date_input(
-            "📍 Simulation End Date",
-            value=max_date.date(),
-            min_value=min_date.date(),
-            max_value=max_date.date(),
-            help=f"Select any date from {min_date.date()} to {max_date.date()}"
+            "📍 End Date",
+            value=datetime.now().date(),
+            max_value=datetime.now().date(),
+            help="Select the end date for your simulation"
+        )
+
+    with col3:
+        interval = st.selectbox(
+            "⏱️ Data Interval",
+            ["1m", "5m", "15m", "1h", "1d"],
+            index=1,
+            help="1m=1 minute, 5m=5 minutes, 1h=1 hour, 1d=1 day"
         )
 
     # Show selected period
     days_selected = (end_date - start_date).days
     st.info(f"📊 Selected period: **{start_date}** to **{end_date}** ({days_selected} days, ~{days_selected//7} weeks)")
 
-    # Quick date range buttons
-    st.markdown("**Quick Select:**")
-    col1, col2, col3, col4, col5 = st.columns(5)
-
-    if col1.button("Last 1 Year"):
-        st.session_state.start_date = max_date - timedelta(days=365)
-        st.session_state.end_date = max_date
-
-    if col2.button("Last 2 Years"):
-        st.session_state.start_date = max_date - timedelta(days=730)
-        st.session_state.end_date = max_date
-
-    if col3.button("Last 3 Years"):
-        st.session_state.start_date = max_date - timedelta(days=1095)
-        st.session_state.end_date = max_date
-
-    if col4.button("Last 5 Years"):
-        st.session_state.start_date = max_date - timedelta(days=1825)
-        st.session_state.end_date = max_date
-
-    if col5.button("Full Period"):
-        st.session_state.start_date = min_date
-        st.session_state.end_date = max_date
+    # Symbols selection
+    symbols_input = st.text_input(
+        "📊 Symbols (comma-separated)",
+        "AAPL,MSFT,GOOGL,AMZN,TSLA,NVDA,META,AMD,NFLX,SPY",
+        help="Enter stock symbols separated by commas"
+    )
+    symbols = [s.strip().upper() for s in symbols_input.split(',')]
 
     # Scanner selection
     st.markdown("### 🔍 Select Stock Scanners")
@@ -338,11 +215,12 @@ def simulation_config_section():
     return {
         'start_date': datetime.combine(start_date, datetime.min.time()),
         'end_date': datetime.combine(end_date, datetime.max.time()),
+        'interval': interval,
+        'symbols': symbols,
         'scanners': [scanner_options[s] for s in selected_scanners],
         'strategies': selected_strategies,
         'initial_capital': initial_capital,
-        'update_interval': update_interval,
-        'metadata': metadata
+        'update_interval': update_interval
     }
 
 
@@ -351,15 +229,29 @@ def run_simulation_section(config):
     if not config:
         return
 
-    st.markdown("## 🚀 Step 3: Run Simulation")
+    st.markdown("## 🚀 Run Simulation")
 
     total_combinations = len(config['scanners']) * len(config['strategies'])
     days = (config['end_date'] - config['start_date']).days
     weeks = days // 7
 
+    # Check if data exists
+    data_exists, existing_symbols = check_data_availability(
+        config['start_date'],
+        config['end_date'],
+        config['interval']
+    )
+
+    if data_exists:
+        st.success(f"✅ Data available for {len(existing_symbols)} symbols at {config['interval']} interval")
+    else:
+        st.info(f"ℹ️ Data will be downloaded automatically when you start the simulation")
+
     st.info(f"""
     **Simulation Summary:**
     - Period: {config['start_date'].date()} to {config['end_date'].date()} ({weeks} weeks)
+    - Interval: {config['interval']}
+    - Symbols: {len(config['symbols'])}
     - Combinations: {total_combinations} ({len(config['scanners'])} scanners × {len(config['strategies'])} strategies)
     - Initial Capital: ${config['initial_capital']:,}
     """)
@@ -373,6 +265,30 @@ def run_simulation_section(config):
         chart_placeholder = st.empty()
 
         try:
+            # Check and download data if needed
+            if not data_exists:
+                status_text.markdown("### 📥 Downloading data...")
+                progress_bar.progress(10)
+
+                from scripts.enhanced_data_downloader import EnhancedDataDownloader
+
+                downloader = EnhancedDataDownloader()
+                data = downloader.download_auto(
+                    symbols=config['symbols'],
+                    start_date=config['start_date'],
+                    end_date=config['end_date'],
+                    interval=config['interval']
+                )
+
+                if not data:
+                    st.error("❌ Failed to download data. Check your Alpaca credentials or try a shorter period.")
+                    st.info("💡 Tip: For Alpaca data, set ALPACA_API_SECRET environment variable")
+                    st.session_state.simulation_running = False
+                    return
+
+                st.success(f"✅ Downloaded {config['interval']} data for {len(data)} symbols!")
+                progress_bar.progress(30)
+
             # Use REAL DATA SIMULATOR - NO synthetic data!
             # Force reload to get latest code changes
             import importlib
@@ -383,12 +299,9 @@ def run_simulation_section(config):
 
             from scripts.real_data_simulator import RealDataSimulator
 
-            # Get symbols from metadata
-            symbols = config['metadata']['symbols']
-
             # Create simulator with REAL market data
             simulator = RealDataSimulator(
-                symbols=symbols,
+                symbols=config['symbols'],
                 start_date=config['start_date'],
                 end_date=config['end_date'],
                 initial_capital=config['initial_capital'],
@@ -538,32 +451,27 @@ def main():
     st.markdown('<div class="main-header">🎮 Interactive Simulation Platform</div>', unsafe_allow_html=True)
 
     st.markdown("""
-    **Welcome to the Interactive Simulator!**
+    **Welcome to the Simplified Interactive Simulator!**
 
     This tool allows you to:
-    - Download real historical market data (up to 10 years)
-    - Select custom date ranges for backtesting
+    - Select date ranges and data interval
     - Choose which scanners and strategies to test
-    - Run simulations on-demand and see results in real-time
+    - Data is downloaded automatically if needed
+    - Run simulations and see results in real-time
     """)
 
     st.markdown("---")
 
-    # Section 1: Data Download
-    download_data_section()
-
-    st.markdown("---")
-
-    # Section 2: Configuration
+    # Configuration
     config = simulation_config_section()
 
     st.markdown("---")
 
-    # Section 3: Run Simulation
+    # Run Simulation
     if config:
         run_simulation_section(config)
 
-    # Section 4: Results
+    # Results
     if st.session_state.simulation_results:
         st.markdown("---")
         results_section()
