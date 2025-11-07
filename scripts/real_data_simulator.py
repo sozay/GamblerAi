@@ -174,8 +174,20 @@ class RealDataSimulator:
 
                 # Filter to our date range
                 # Convert user-selected dates to UTC for comparison
-                start_date_utc = pd.Timestamp(self.start_date).tz_localize('America/New_York').tz_convert('UTC')
-                end_date_utc = pd.Timestamp(self.end_date).tz_localize('America/New_York').tz_convert('UTC')
+                start_ts = pd.Timestamp(self.start_date)
+                end_ts = pd.Timestamp(self.end_date)
+
+                # Check if already timezone-aware, if not localize first
+                if start_ts.tz is None:
+                    start_date_utc = start_ts.tz_localize('America/New_York').tz_convert('UTC')
+                else:
+                    start_date_utc = start_ts.tz_convert('UTC')
+
+                if end_ts.tz is None:
+                    end_date_utc = end_ts.tz_localize('America/New_York').tz_convert('UTC')
+                else:
+                    end_date_utc = end_ts.tz_convert('UTC')
+
                 logger.info(f"Filtering data: {start_date_utc} to {end_date_utc} (UTC)")
 
                 combined_df = combined_df[
@@ -214,8 +226,19 @@ class RealDataSimulator:
         df = self.market_data[symbol]
 
         # All data is now in UTC, convert week dates to UTC for comparison
-        start_utc = pd.Timestamp(start).tz_localize('America/New_York').tz_convert('UTC')
-        end_utc = pd.Timestamp(end).tz_localize('America/New_York').tz_convert('UTC')
+        start_ts = pd.Timestamp(start)
+        end_ts = pd.Timestamp(end)
+
+        # Check if already timezone-aware, if not localize first
+        if start_ts.tz is None:
+            start_utc = start_ts.tz_localize('America/New_York').tz_convert('UTC')
+        else:
+            start_utc = start_ts.tz_convert('UTC')
+
+        if end_ts.tz is None:
+            end_utc = end_ts.tz_localize('America/New_York').tz_convert('UTC')
+        else:
+            end_utc = end_ts.tz_convert('UTC')
 
         week_df = df[(df['timestamp'] >= start_utc) & (df['timestamp'] <= end_utc)].copy()
 
