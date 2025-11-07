@@ -354,8 +354,11 @@ class EnhancedDataDownloader:
             'v': 'volume',
         })
 
-        # Keep only OHLCV columns
-        df = df[['timestamp', 'open', 'high', 'low', 'close', 'volume']]
+        # Add symbol column
+        df['symbol'] = symbol
+
+        # Keep only required columns
+        df = df[['timestamp', 'symbol', 'open', 'high', 'low', 'close', 'volume']]
         df = df.sort_values('timestamp')
 
         return df

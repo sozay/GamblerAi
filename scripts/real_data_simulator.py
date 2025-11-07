@@ -282,9 +282,21 @@ class RealDataSimulator:
 
         df = self.market_data[symbol]
 
-        # All data is now in UTC, convert week dates to UTC for comparison
-        start_utc = pd.Timestamp(start).tz_localize('America/New_York').tz_convert('UTC')
-        end_utc = pd.Timestamp(end).tz_localize('America/New_York').tz_convert('UTC')
+        # Convert week dates to UTC for comparison with data timestamps
+        # Handle both timezone-naive and timezone-aware inputs
+        start_ts = pd.Timestamp(start)
+        end_ts = pd.Timestamp(end)
+
+        # If timezone-naive, localize to Eastern time first, then convert to UTC
+        if start_ts.tz is None:
+            start_utc = start_ts.tz_localize('America/New_York').tz_convert('UTC')
+        else:
+            start_utc = start_ts.tz_convert('UTC')
+
+        if end_ts.tz is None:
+            end_utc = end_ts.tz_localize('America/New_York').tz_convert('UTC')
+        else:
+            end_utc = end_ts.tz_convert('UTC')
 
         week_df = df[(df['timestamp'] >= start_utc) & (df['timestamp'] <= end_utc)].copy()
 
