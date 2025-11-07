@@ -218,6 +218,95 @@ class RealDataSimulator:
 
         return periods
 
+    def _rank_symbols_by_scanner(
+        self,
+        week_start: datetime,
+        week_end: datetime,
+        scanner_type: ScannerType,
+        top_n: int = 3
+    ) -> List[str]:
+        """
+        Rank symbols based on scanner criteria and return top N.
+
+        Args:
+            week_start: Week start date
+            week_end: Week end date
+            scanner_type: Scanner type to use for ranking
+            top_n: Number of top symbols to return
+
+        Returns:
+            List of top N symbols based on scanner criteria
+        """
+        symbol_scores = []
+
+        for symbol in self.symbols:
+            week_data = self._get_week_data(symbol, week_start, week_end)
+
+            if week_data is None or len(week_data) < 2:
+                continue
+
+            # Calculate metrics for ranking based on scanner type
+            score = 0
+
+            if scanner_type == ScannerType.TOP_MOVERS:
+                # Rank by absolute price change percentage
+                price_change = (week_data['close'].iloc[-1] - week_data['close'].iloc[0]) / week_data['close'].iloc[0]
+                score = abs(price_change)
+
+            elif scanner_type == ScannerType.HIGH_VOLUME:
+                # Rank by average volume
+                score = week_data['volume'].mean()
+
+            elif scanner_type == ScannerType.BEST_SETUPS:
+                # Rank by combination of momentum and volume
+                price_change = (week_data['close'].iloc[-1] - week_data['close'].iloc[0]) / week_data['close'].iloc[0]
+                volume_avg = week_data['volume'].mean()
+                score = abs(price_change) * volume_avg
+
+            elif scanner_type == ScannerType.RELATIVE_STRENGTH:
+                # Rank by positive price momentum
+                price_change = (week_data['close'].iloc[-1] - week_data['close'].iloc[0]) / week_data['close'].iloc[0]
+                score = price_change  # Prefer positive moves
+
+            elif scanner_type == ScannerType.GAP_SCANNER:
+                # Rank by largest intraday gaps
+                if len(week_data) > 1:
+                    gaps = []
+                    for i in range(1, len(week_data)):
+                        gap = abs((week_data['open'].iloc[i] - week_data['close'].iloc[i-1]) / week_data['close'].iloc[i-1])
+                        gaps.append(gap)
+                    score = max(gaps) if gaps else 0
+                else:
+                    score = 0
+
+            elif scanner_type == ScannerType.VOLATILITY_RANGE:
+                # Rank by volatility (high-low range)
+                volatility = ((week_data['high'] - week_data['low']) / week_data['close']).mean()
+                score = volatility
+
+            elif scanner_type == ScannerType.SECTOR_LEADERS:
+                # Rank by consistent upward movement
+                if len(week_data) >= 3:
+                    returns = week_data['close'].pct_change()
+                    positive_days = (returns > 0).sum()
+                    score = positive_days / len(returns)
+                else:
+                    score = 0
+
+            elif scanner_type == ScannerType.MARKET_CAP_WEIGHTED:
+                # Rank by volume as proxy for market cap (higher volume = larger cap)
+                score = week_data['volume'].mean()
+
+            symbol_scores.append((symbol, score))
+
+        # Sort by score descending and return top N symbols
+        symbol_scores.sort(key=lambda x: x[1], reverse=True)
+        top_symbols = [s[0] for s in symbol_scores[:top_n]]
+
+        logger.debug(f"Scanner {scanner_type.value} selected: {top_symbols}")
+
+        return top_symbols
+
     def _get_week_data(self, symbol: str, start: datetime, end: datetime) -> Optional[pd.DataFrame]:
         """Get market data for a specific week."""
         if symbol not in self.market_data:
@@ -433,11 +522,17 @@ class RealDataSimulator:
     ) -> Dict:
         """
         Simulate trading for one week using REAL DATA ONLY.
+        Now uses scanner to filter which symbols to trade.
         """
         all_trades = []
 
-        # Get data for each symbol
-        for symbol in self.symbols:
+        # Use scanner to filter/rank symbols - trade only top 3 symbols per week
+        selected_symbols = self._rank_symbols_by_scanner(
+            week_start, week_end, scanner_type, top_n=3
+        )
+
+        # Only trade the selected symbols
+        for symbol in selected_symbols:
             week_data = self._get_week_data(symbol, week_start, week_end)
 
             if week_data is None:
