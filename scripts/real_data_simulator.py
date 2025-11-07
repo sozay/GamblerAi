@@ -401,6 +401,100 @@ class RealDataSimulator:
 
         return trades
 
+    def _select_stocks_by_scanner(
+        self,
+        week_start: datetime,
+        week_end: datetime,
+        scanner_type: ScannerType,
+        max_stocks: int = 3
+    ) -> List[str]:
+        """
+        Select top stocks based on scanner type for the week.
+
+        Args:
+            week_start: Start of week
+            week_end: End of week
+            scanner_type: Type of scanner to use
+            max_stocks: Maximum number of stocks to select
+
+        Returns:
+            List of selected stock symbols
+        """
+        stock_scores = []
+
+        for symbol in self.symbols:
+            week_data = self._get_week_data(symbol, week_start, week_end)
+
+            if week_data is None or len(week_data) < 20:
+                continue
+
+            # Calculate metrics for this stock
+            try:
+                # Price change over the week
+                price_change = (week_data['close'].iloc[-1] - week_data['close'].iloc[0]) / week_data['close'].iloc[0] * 100
+
+                # Volume ratio (recent vs baseline)
+                if len(week_data) >= 40:
+                    baseline_volume = week_data['volume'].iloc[:len(week_data)//2].mean()
+                    recent_volume = week_data['volume'].iloc[len(week_data)//2:].max()
+                else:
+                    baseline_volume = week_data['volume'].mean()
+                    recent_volume = week_data['volume'].max()
+
+                volume_ratio = recent_volume / baseline_volume if baseline_volume > 0 else 1.0
+
+                # Volatility
+                volatility = week_data['close'].pct_change().std()
+
+                # ATR (for gap detection)
+                week_data['high_low_range'] = week_data['high'] - week_data['low']
+                atr = week_data['high_low_range'].rolling(window=min(14, len(week_data)//2)).mean().iloc[-1]
+
+                # Score based on scanner type
+                score = 0
+
+                if scanner_type == ScannerType.TOP_MOVERS:
+                    # Score by absolute price movement and volume
+                    if abs(price_change) >= 0.5 and volume_ratio >= 1.2:
+                        score = abs(price_change) * volume_ratio
+
+                elif scanner_type == ScannerType.HIGH_VOLUME:
+                    # Score by volume ratio
+                    if volume_ratio >= 1.2:
+                        score = volume_ratio * 10
+
+                elif scanner_type == ScannerType.BEST_SETUPS:
+                    # Score by balanced metrics (volatility, volume, move)
+                    if volatility is not None and 0.10 <= volatility <= 0.50:
+                        score = volatility * volume_ratio * (1 + abs(price_change) / 10)
+
+                elif scanner_type == ScannerType.RELATIVE_STRENGTH:
+                    # Score by positive price change with volume
+                    if price_change > 0 and volume_ratio >= 1.1:
+                        score = price_change * volume_ratio
+
+                elif scanner_type == ScannerType.GAP_SCANNER:
+                    # Score by gaps (large intrabar ranges)
+                    max_range_pct = (week_data['high_low_range'] / week_data['close'] * 100).max()
+                    if max_range_pct > 2.0:  # 2% intrabar range
+                        score = max_range_pct * volume_ratio
+
+                if score > 0:
+                    stock_scores.append((symbol, score))
+
+            except Exception as e:
+                logger.debug(f"Error scoring {symbol}: {e}")
+                continue
+
+        # Sort by score and select top N
+        stock_scores.sort(key=lambda x: x[1], reverse=True)
+        selected = [symbol for symbol, _ in stock_scores[:max_stocks]]
+
+        if selected:
+            logger.debug(f"{scanner_type.value}: Selected {selected} from {len(stock_scores)} candidates")
+
+        return selected
+
     def _simulate_week(
         self,
         week_start: datetime,
@@ -410,11 +504,25 @@ class RealDataSimulator:
     ) -> Dict:
         """
         Simulate trading for one week using REAL DATA ONLY.
+        Applies scanner filtering to select top stocks.
         """
         all_trades = []
 
-        # Get data for each symbol
-        for symbol in self.symbols:
+        # Select stocks based on scanner type
+        selected_symbols = self._select_stocks_by_scanner(
+            week_start, week_end, scanner_type, max_stocks=3
+        )
+
+        if not selected_symbols:
+            logger.debug(f"No stocks selected by {scanner_type.value} for week {week_start.date()}")
+            return {
+                'pnl': 0,
+                'trades_count': 0,
+                'win_rate': 0,
+            }
+
+        # Trade only the selected symbols
+        for symbol in selected_symbols:
             week_data = self._get_week_data(symbol, week_start, week_end)
 
             if week_data is None:

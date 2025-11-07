@@ -138,6 +138,90 @@ def calculate_volatility_breakout_signals(data: pd.DataFrame, position_size: flo
     return trades
 
 
+def select_stocks_by_scanner(
+    market_data: Dict[str, pd.DataFrame],
+    scanner_name: str,
+    week_start: datetime,
+    week_end: datetime,
+    max_stocks: int = 3
+) -> List[str]:
+    """
+    Select top stocks based on scanner type for the week.
+
+    Args:
+        market_data: All market data
+        scanner_name: Scanner type name
+        week_start: Start of week
+        week_end: End of week
+        max_stocks: Maximum number of stocks to select
+
+    Returns:
+        List of selected stock symbols
+    """
+    stock_scores = []
+
+    for symbol, df in market_data.items():
+        # Filter to week
+        start_utc = pd.Timestamp(week_start).tz_localize('America/New_York').tz_convert('UTC')
+        end_utc = pd.Timestamp(week_end).tz_localize('America/New_York').tz_convert('UTC')
+        week_df = df[(df['timestamp'] >= start_utc) & (df['timestamp'] <= end_utc)].copy()
+
+        if len(week_df) < 20:
+            continue
+
+        try:
+            # Calculate metrics
+            price_change = (week_df['close'].iloc[-1] - week_df['close'].iloc[0]) / week_df['close'].iloc[0] * 100
+
+            # Volume ratio
+            if len(week_df) >= 40:
+                baseline_volume = week_df['volume'].iloc[:len(week_df)//2].mean()
+                recent_volume = week_df['volume'].iloc[len(week_df)//2:].max()
+            else:
+                baseline_volume = week_df['volume'].mean()
+                recent_volume = week_df['volume'].max()
+
+            volume_ratio = recent_volume / baseline_volume if baseline_volume > 0 else 1.0
+
+            # Volatility
+            volatility = week_df['close'].pct_change().std()
+
+            # Score based on scanner type
+            score = 0
+
+            if scanner_name == 'top_movers':
+                # Score by absolute price movement and volume
+                if abs(price_change) >= 0.5 and volume_ratio >= 1.2:
+                    score = abs(price_change) * volume_ratio
+
+            elif scanner_name == 'high_volume':
+                # Score by volume ratio
+                if volume_ratio >= 1.2:
+                    score = volume_ratio * 10
+
+            elif scanner_name == 'best_setups':
+                # Score by balanced metrics
+                if volatility is not None and 0.10 <= volatility <= 0.50:
+                    score = volatility * volume_ratio * (1 + abs(price_change) / 10)
+
+            if score > 0:
+                stock_scores.append((symbol, score, price_change, volume_ratio))
+
+        except Exception as e:
+            continue
+
+    # Sort by score and select top N
+    stock_scores.sort(key=lambda x: x[1], reverse=True)
+    selected = [symbol for symbol, _, _, _ in stock_scores[:max_stocks]]
+
+    if selected and stock_scores:
+        logger.debug(f"{scanner_name}: Selected {selected} from {len(stock_scores)} candidates")
+        for symbol, score, pc, vr in stock_scores[:max_stocks]:
+            logger.debug(f"  {symbol}: score={score:.1f}, price_change={pc:+.1f}%, volume_ratio={vr:.1f}x")
+
+    return selected
+
+
 def simulate_combination(
     market_data: Dict[str, pd.DataFrame],
     scanner_name: str,
@@ -169,8 +253,19 @@ def simulate_combination(
 
         week_trades = []
 
-        # Process each symbol
-        for symbol in market_data.keys():
+        # Select stocks based on scanner type
+        selected_symbols = select_stocks_by_scanner(
+            market_data, scanner_name, week_start, week_end, max_stocks=3
+        )
+
+        if not selected_symbols:
+            logger.info(f"  No stocks selected by {scanner_name}")
+            continue
+
+        logger.info(f"  Selected: {', '.join(selected_symbols)}")
+
+        # Process only selected symbols
+        for symbol in selected_symbols:
             df = market_data[symbol]
 
             # Filter to week
