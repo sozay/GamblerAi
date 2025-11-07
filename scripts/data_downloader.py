@@ -86,15 +86,24 @@ class DataDownloader:
                 logger.error(f"No data returned for {symbol}")
                 return pd.DataFrame()
 
-            # Standardize column names
-            df.columns = [col.lower() for col in df.columns]
+            # Reset index first to get the date/datetime column
             df.reset_index(inplace=True)
 
-            # Ensure we have timestamp column
-            if 'datetime' in df.columns:
-                df.rename(columns={'datetime': 'timestamp'}, inplace=True)
-            elif 'date' in df.columns:
-                df.rename(columns={'date': 'timestamp'}, inplace=True)
+            # Standardize column names to lowercase
+            df.columns = [col.lower() for col in df.columns]
+
+            # Ensure we have timestamp column - check various possible names
+            timestamp_col = None
+            for possible_name in ['datetime', 'date', 'timestamp', 'index']:
+                if possible_name in df.columns:
+                    timestamp_col = possible_name
+                    break
+
+            if timestamp_col and timestamp_col != 'timestamp':
+                df.rename(columns={timestamp_col: 'timestamp'}, inplace=True)
+            elif 'timestamp' not in df.columns:
+                # If still no timestamp column, use the index
+                df['timestamp'] = df.index
 
             df['symbol'] = symbol
 
@@ -212,20 +221,41 @@ class DataDownloader:
         )
 
         # Save metadata
+        data_summary = {}
+        for symbol, df in data.items():
+            try:
+                # Ensure timestamp column exists and is datetime
+                if 'timestamp' in df.columns:
+                    if not pd.api.types.is_datetime64_any_dtype(df['timestamp']):
+                        df['timestamp'] = pd.to_datetime(df['timestamp'])
+
+                    data_summary[symbol] = {
+                        'rows': len(df),
+                        'start': df['timestamp'].min().isoformat(),
+                        'end': df['timestamp'].max().isoformat()
+                    }
+                else:
+                    logger.warning(f"No timestamp column for {symbol}, using row count only")
+                    data_summary[symbol] = {
+                        'rows': len(df),
+                        'start': start_date.isoformat(),
+                        'end': end_date.isoformat()
+                    }
+            except Exception as e:
+                logger.error(f"Error processing metadata for {symbol}: {e}")
+                data_summary[symbol] = {
+                    'rows': len(df),
+                    'start': start_date.isoformat(),
+                    'end': end_date.isoformat()
+                }
+
         metadata = {
             'symbols': symbols,
             'start_date': start_date.isoformat(),
             'end_date': end_date.isoformat(),
             'interval': interval,
             'download_timestamp': datetime.now().isoformat(),
-            'data_summary': {
-                symbol: {
-                    'rows': len(df),
-                    'start': df['timestamp'].min().isoformat(),
-                    'end': df['timestamp'].max().isoformat()
-                }
-                for symbol, df in data.items()
-            }
+            'data_summary': data_summary
         }
 
         metadata_file = self.cache_dir / 'metadata.json'
