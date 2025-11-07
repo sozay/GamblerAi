@@ -161,9 +161,21 @@ class RealDataSimulator:
                 combined_df = combined_df.drop_duplicates(subset=['timestamp'], keep='last')
 
                 # Filter to our date range
+                # Handle timezone-aware timestamps by converting dates to timezone-aware
+                if pd.api.types.is_datetime64tz_dtype(combined_df['timestamp']):
+                    # Data has timezone, localize our dates to match
+                    tz = combined_df['timestamp'].dt.tz
+                    start_date_tz = pd.Timestamp(self.start_date).tz_localize(tz)
+                    end_date_tz = pd.Timestamp(self.end_date).tz_localize(tz)
+                    logger.info(f"Data has timezone {tz}, localizing filter dates")
+                else:
+                    # Data is timezone-naive, use as-is
+                    start_date_tz = self.start_date
+                    end_date_tz = self.end_date
+
                 combined_df = combined_df[
-                    (combined_df['timestamp'] >= self.start_date) &
-                    (combined_df['timestamp'] <= self.end_date)
+                    (combined_df['timestamp'] >= start_date_tz) &
+                    (combined_df['timestamp'] <= end_date_tz)
                 ]
 
                 if len(combined_df) > 0:
@@ -195,7 +207,17 @@ class RealDataSimulator:
             return None
 
         df = self.market_data[symbol]
-        week_df = df[(df['timestamp'] >= start) & (df['timestamp'] <= end)].copy()
+
+        # Handle timezone-aware timestamps
+        if pd.api.types.is_datetime64tz_dtype(df['timestamp']):
+            tz = df['timestamp'].dt.tz
+            start_tz = pd.Timestamp(start).tz_localize(tz)
+            end_tz = pd.Timestamp(end).tz_localize(tz)
+        else:
+            start_tz = start
+            end_tz = end
+
+        week_df = df[(df['timestamp'] >= start_tz) & (df['timestamp'] <= end_tz)].copy()
 
         return week_df if len(week_df) > 0 else None
 
