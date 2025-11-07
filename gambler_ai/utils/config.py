@@ -56,6 +56,10 @@ class Settings(BaseSettings):
     redis_port: int = 6379
     log_level: str = "INFO"
 
+    # Alpaca API credentials (optional - for data downloads)
+    alpaca_api_key: str = ""
+    alpaca_api_secret: str = ""
+
     class Config:
         env_file = ".env"
         env_file_encoding = "utf-8"
