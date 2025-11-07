@@ -19,8 +19,10 @@ from gambler_ai.analysis.momentum_detector import MomentumDetector
 from gambler_ai.analysis.mean_reversion_detector import MeanReversionDetector
 from gambler_ai.analysis.volatility_breakout_detector import VolatilityBreakoutDetector
 
-logging.basicConfig(level=logging.INFO)
+# Set logging level to INFO to see all messages
+logging.basicConfig(level=logging.INFO, format='%(levelname)s:%(name)s:%(message)s')
 logger = logging.getLogger(__name__)
+logger.setLevel(logging.INFO)
 
 
 class RealDataSimulator:
@@ -85,9 +87,13 @@ class RealDataSimulator:
 
     def _load_market_data(self):
         """Load real market data from cache."""
-        logger.info("Loading real market data from cache...")
+        logger.info("="*80)
+        logger.info("LOADING REAL MARKET DATA FROM CACHE")
+        logger.info("="*80)
 
         cache_dir = Path("market_data_cache")
+        logger.info(f"Cache directory path: {cache_dir.absolute()}")
+        logger.info(f"Cache directory exists: {cache_dir.exists()}")
 
         if not cache_dir.exists():
             logger.error(f"Cache directory not found: {cache_dir.absolute()}")
@@ -95,8 +101,9 @@ class RealDataSimulator:
             return
 
         # List all files in cache
+        logger.info("Scanning for data files in cache...")
         all_files = list(cache_dir.glob("*.*"))
-        logger.info(f"Found {len(all_files)} files in cache directory")
+        logger.info(f"*** Found {len(all_files)} files in cache directory ***")
 
         if all_files:
             logger.info(f"Sample files: {[f.name for f in all_files[:5]]}")

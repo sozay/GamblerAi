@@ -368,6 +368,13 @@ def run_simulation_section(config):
 
         try:
             # Use REAL DATA SIMULATOR - NO synthetic data!
+            # Force reload to get latest code changes
+            import importlib
+            import sys
+            if 'scripts.real_data_simulator' in sys.modules:
+                import scripts.real_data_simulator
+                importlib.reload(scripts.real_data_simulator)
+
             from scripts.real_data_simulator import RealDataSimulator
 
             # Get symbols from metadata
