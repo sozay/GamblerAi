@@ -38,7 +38,9 @@ if not api_key or not api_secret:
 
 # Test API connection
 print("\n🔍 Testing API connection...")
-url = "https://data.alpaca.markets/v2/stocks/AAPL/bars"
+base_url = "https://data.alpaca.markets/v2"
+url = f"{base_url}/stocks/AAPL/bars"
+print(f"Testing endpoint: {url}")
 headers = {
     'accept': 'application/json',
     'APCA-API-KEY-ID': api_key,

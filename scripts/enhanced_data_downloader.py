@@ -56,6 +56,7 @@ class EnhancedDataDownloader:
                 'APCA-API-SECRET-KEY': self.alpaca_config['api_secret']
             }
             logger.info("✓ Alpaca credentials loaded successfully")
+            logger.info(f"✓ Using Alpaca API base URL: {self.alpaca_config['base_url']}")
         else:
             logger.warning("⚠ Alpaca credentials not found - only Yahoo Finance will be available")
 
@@ -86,9 +87,12 @@ class EnhancedDataDownloader:
                     # Get API secret from environment or config
                     config['api_secret'] = os.environ.get('ALPACA_API_SECRET', alpaca_config.get('api_secret', ''))
 
-                    # Get data URL
-                    data_url = alpaca_config.get('data_url', config['base_url'])
+                    # Get data URL and ensure it has /v2
+                    data_url = alpaca_config.get('data_url', '')
                     if data_url:
+                        # Ensure URL ends with /v2
+                        if not data_url.endswith('/v2'):
+                            data_url = data_url.rstrip('/') + '/v2'
                         config['base_url'] = data_url
 
             except Exception as e:
@@ -288,6 +292,7 @@ class EnhancedDataDownloader:
 
         # API endpoint
         url = f"{self.alpaca_config['base_url']}/stocks/{symbol}/bars"
+        logger.debug(f"  Fetching from URL: {url}")
 
         params = {
             'start': start_str,
