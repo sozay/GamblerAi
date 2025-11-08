@@ -11,13 +11,17 @@ from sqlalchemy import (
     BigInteger,
     Column,
     DateTime,
+    Float,
     Integer,
     String,
     Text,
     UniqueConstraint,
+    ForeignKey,
+    JSON,
 )
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
 
 Base = declarative_base()
 
@@ -155,4 +159,96 @@ class DataQualityLog(Base):
         return (
             f"<DataQualityLog(symbol={self.symbol}, date={self.check_date}, "
             f"score={self.quality_score})>"
+        )
+
+
+class TradingSession(Base):
+    """Paper trading session tracking for crash recovery."""
+
+    __tablename__ = "trading_sessions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(String(36), unique=True, nullable=False, index=True)  # UUID
+    start_time = Column(DateTime(timezone=True), nullable=False, index=True)
+    end_time = Column(DateTime(timezone=True))
+    status = Column(String(20), nullable=False, default='active', index=True)  # active, completed, crashed
+    symbols = Column(Text)  # Comma-separated list
+    duration_minutes = Column(Integer)
+    scan_interval_seconds = Column(Integer)
+    initial_portfolio_value = Column(DECIMAL(12, 2))
+    final_portfolio_value = Column(DECIMAL(12, 2))
+    pnl = Column(DECIMAL(12, 2))
+    pnl_pct = Column(DECIMAL(5, 2))
+    total_trades = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    positions = relationship("Position", back_populates="session", cascade="all, delete-orphan")
+    checkpoints = relationship("PositionCheckpoint", back_populates="session", cascade="all, delete-orphan")
+
+    def __repr__(self):
+        return (
+            f"<TradingSession(id={self.session_id}, status={self.status}, "
+            f"start={self.start_time})>"
+        )
+
+
+class Position(Base):
+    """Trading position tracking (active and historical)."""
+
+    __tablename__ = "positions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(String(36), ForeignKey('trading_sessions.session_id'), nullable=False, index=True)
+    symbol = Column(String(10), nullable=False, index=True)
+    entry_time = Column(DateTime(timezone=True), nullable=False, index=True)
+    exit_time = Column(DateTime(timezone=True))
+    entry_price = Column(DECIMAL(10, 2), nullable=False)
+    exit_price = Column(DECIMAL(10, 2))
+    qty = Column(Integer, nullable=False)
+    direction = Column(String(10), nullable=False)  # UP or DOWN
+    side = Column(String(10), nullable=False)  # buy or sell
+    stop_loss = Column(DECIMAL(10, 2))
+    take_profit = Column(DECIMAL(10, 2))
+    order_id = Column(String(50), index=True)  # Alpaca order ID
+    status = Column(String(20), nullable=False, default='active', index=True)  # active, closed
+    exit_reason = Column(String(50))  # stop_loss_hit, take_profit_hit, manual, session_end
+    pnl = Column(DECIMAL(12, 2))
+    pnl_pct = Column(DECIMAL(5, 2))
+    duration_minutes = Column(Integer)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationship
+    session = relationship("TradingSession", back_populates="positions")
+
+    def __repr__(self):
+        return (
+            f"<Position(symbol={self.symbol}, direction={self.direction}, "
+            f"status={self.status}, entry={self.entry_price})>"
+        )
+
+
+class PositionCheckpoint(Base):
+    """Periodic state checkpoints for crash recovery."""
+
+    __tablename__ = "position_checkpoints"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(String(36), ForeignKey('trading_sessions.session_id'), nullable=False, index=True)
+    checkpoint_time = Column(DateTime(timezone=True), nullable=False, index=True)
+    positions_snapshot = Column(JSON)  # Snapshot of active positions
+    account_snapshot = Column(JSON)  # Snapshot of account state
+    active_positions_count = Column(Integer, default=0)
+    closed_trades_count = Column(Integer, default=0)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationship
+    session = relationship("TradingSession", back_populates="checkpoints")
+
+    def __repr__(self):
+        return (
+            f"<PositionCheckpoint(session={self.session_id}, time={self.checkpoint_time}, "
+            f"positions={self.active_positions_count})>"
         )
