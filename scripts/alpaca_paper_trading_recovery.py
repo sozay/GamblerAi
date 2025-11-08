@@ -172,24 +172,24 @@ class AlpacaPaperTraderWithRecovery:
         self.load_positions_from_db()
 
     def load_positions_from_db(self):
-        """Load open positions from database into memory."""
+        """Load active positions from database into memory."""
         if not self.state_manager:
             return
 
         self.active_positions = {}
-        open_positions = self.state_manager.get_open_positions()
+        active_positions = self.state_manager.get_open_positions()
 
-        for pos in open_positions:
+        for pos in active_positions:
             self.active_positions[pos.symbol] = {
                 'symbol': pos.symbol,
                 'entry_time': pos.entry_time,
                 'entry_price': float(pos.entry_price),
-                'qty': float(pos.quantity),
-                'direction': pos.direction,
+                'qty': int(pos.qty),  # Main's model uses Integer qty
+                'direction': pos.direction,  # 'UP' or 'DOWN'
                 'side': pos.side,
                 'stop_loss': float(pos.stop_loss) if pos.stop_loss else None,
                 'take_profit': float(pos.take_profit) if pos.take_profit else None,
-                'order_id': pos.entry_order_id,
+                'order_id': pos.order_id,  # Main's model uses order_id not entry_order_id
                 'position_id': pos.id
             }
 
@@ -390,11 +390,11 @@ class AlpacaPaperTraderWithRecovery:
                     entry_time=entry_time,
                     entry_price=entry_price,
                     quantity=qty,
-                    direction=direction,
+                    direction=direction,  # Should be 'UP' or 'DOWN'
                     side=side,
                     stop_loss=stop_loss,
                     take_profit=take_profit,
-                    entry_order_id=order['id']
+                    order_id=order['id']  # Main's model uses order_id
                 )
 
             # Track in memory
@@ -505,11 +505,8 @@ class AlpacaPaperTraderWithRecovery:
                 self.state_manager.create_session(
                     symbols=symbols,
                     initial_capital=initial_value,
-                    parameters={
-                        'stop_loss_pct': self.stop_loss_pct,
-                        'take_profit_pct': self.take_profit_pct,
-                        'position_size': self.position_size
-                    }
+                    duration_minutes=duration_minutes,
+                    scan_interval_seconds=scan_interval_seconds
                 )
 
             # Reconcile positions
@@ -544,7 +541,7 @@ class AlpacaPaperTraderWithRecovery:
         if self.state_manager:
             self.state_manager.end_session(
                 final_capital=final_value,
-                status='stopped' if not self.shutdown_requested else 'interrupted'
+                status='completed' if not self.shutdown_requested else 'crashed'
             )
 
         # Final report

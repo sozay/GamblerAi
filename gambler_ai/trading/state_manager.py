@@ -31,7 +31,8 @@ class StateManager:
         self,
         symbols: List[str],
         initial_capital: float,
-        parameters: Dict = None
+        duration_minutes: int = None,
+        scan_interval_seconds: int = None
     ) -> str:
         """
         Create a new trading session.
@@ -39,7 +40,8 @@ class StateManager:
         Args:
             symbols: List of symbols to trade
             initial_capital: Starting capital
-            parameters: Strategy parameters
+            duration_minutes: Session duration in minutes
+            scan_interval_seconds: Scan interval in seconds
 
         Returns:
             Session ID
@@ -50,9 +52,10 @@ class StateManager:
             session_id=self.session_id,
             start_time=datetime.now(timezone.utc),
             status='active',
-            initial_capital=Decimal(str(initial_capital)),
-            symbols=json.dumps(symbols),
-            parameters=json.dumps(parameters or {})
+            initial_portfolio_value=Decimal(str(initial_capital)),
+            symbols=','.join(symbols),  # Comma-separated string
+            duration_minutes=duration_minutes,
+            scan_interval_seconds=scan_interval_seconds
         )
 
         self.db.add(session)
@@ -88,24 +91,32 @@ class StateManager:
             self.current_session = session
             print(f"✓ Resumed session: {self.session_id}")
             print(f"  Started: {session.start_time}")
-            print(f"  Symbols: {json.loads(session.symbols)}")
+            print(f"  Symbols: {session.symbols}")
 
         return session
 
-    def end_session(self, final_capital: float, status: str = 'stopped'):
+    def end_session(self, final_capital: float, status: str = 'completed'):
         """
         End the current trading session.
 
         Args:
             final_capital: Final portfolio value
-            status: 'stopped' or 'crashed'
+            status: 'completed' or 'crashed'
         """
         if not self.current_session:
             return
 
         self.current_session.end_time = datetime.now(timezone.utc)
-        self.current_session.final_capital = Decimal(str(final_capital))
+        self.current_session.final_portfolio_value = Decimal(str(final_capital))
         self.current_session.status = status
+
+        # Calculate P&L
+        if self.current_session.initial_portfolio_value:
+            pnl = Decimal(str(final_capital)) - self.current_session.initial_portfolio_value
+            self.current_session.pnl = pnl
+            if self.current_session.initial_portfolio_value > 0:
+                pnl_pct = (pnl / self.current_session.initial_portfolio_value) * 100
+                self.current_session.pnl_pct = pnl_pct
 
         self.db.commit()
         print(f"✓ Session ended: {status}")
@@ -120,12 +131,21 @@ class StateManager:
         side: str,
         stop_loss: float = None,
         take_profit: float = None,
-        entry_order_id: str = None,
-        stop_loss_order_id: str = None,
-        take_profit_order_id: str = None
+        order_id: str = None
     ) -> int:
         """
         Save a position to the database.
+
+        Args:
+            symbol: Stock symbol
+            entry_time: Entry timestamp
+            entry_price: Entry price
+            quantity: Position quantity (shares)
+            direction: 'UP' or 'DOWN' (momentum direction)
+            side: 'buy' or 'sell'
+            stop_loss: Stop loss price
+            take_profit: Take profit price
+            order_id: Alpaca order ID
 
         Returns:
             Position ID
@@ -138,15 +158,13 @@ class StateManager:
             symbol=symbol,
             entry_time=entry_time,
             entry_price=Decimal(str(entry_price)),
-            quantity=Decimal(str(quantity)),
-            direction=direction,
+            qty=int(quantity),  # Main's model uses Integer qty
+            direction=direction,  # Should be 'UP' or 'DOWN'
             side=side,
             stop_loss=Decimal(str(stop_loss)) if stop_loss else None,
             take_profit=Decimal(str(take_profit)) if take_profit else None,
-            entry_order_id=entry_order_id,
-            stop_loss_order_id=stop_loss_order_id,
-            take_profit_order_id=take_profit_order_id,
-            status='open'
+            order_id=order_id,
+            status='active'  # Main's model uses 'active' instead of 'open'
         )
 
         self.db.add(position)
@@ -178,7 +196,7 @@ class StateManager:
         position = self.db.query(Position).filter_by(
             session_id=self.session_id,
             symbol=symbol,
-            status='open'
+            status='active'  # Main's model uses 'active' not 'open'
         ).first()
 
         if not position:
@@ -190,15 +208,22 @@ class StateManager:
             position.exit_price = Decimal(str(exit_price))
 
             # Calculate P&L
-            if position.direction == 'LONG':
-                pnl = (Decimal(str(exit_price)) - position.entry_price) * position.quantity
+            # Main's Position uses 'UP' or 'DOWN' for direction
+            # For UP: long position, for DOWN: short position
+            if position.direction == 'UP':
+                pnl = (Decimal(str(exit_price)) - position.entry_price) * position.qty
                 pnl_pct = (Decimal(str(exit_price)) - position.entry_price) / position.entry_price * 100
-            else:  # SHORT
-                pnl = (position.entry_price - Decimal(str(exit_price))) * position.quantity
+            else:  # DOWN
+                pnl = (position.entry_price - Decimal(str(exit_price))) * position.qty
                 pnl_pct = (position.entry_price - Decimal(str(exit_price))) / position.entry_price * 100
 
             position.pnl = pnl
             position.pnl_pct = pnl_pct
+
+            # Calculate duration
+            if exit_time and position.entry_time:
+                duration = (exit_time - position.entry_time).total_seconds() / 60
+                position.duration_minutes = int(duration)
 
         if exit_reason:
             position.exit_reason = exit_reason
@@ -209,7 +234,7 @@ class StateManager:
 
     def get_open_positions(self) -> List[Position]:
         """
-        Get all open positions for current session.
+        Get all active positions for current session.
 
         Returns:
             List of Position objects
@@ -219,12 +244,12 @@ class StateManager:
 
         return self.db.query(Position).filter_by(
             session_id=self.session_id,
-            status='open'
+            status='active'  # Main's model uses 'active' not 'open'
         ).all()
 
     def get_position_by_symbol(self, symbol: str) -> Optional[Position]:
         """
-        Get open position for a symbol.
+        Get active position for a symbol.
 
         Returns:
             Position object or None
@@ -235,7 +260,7 @@ class StateManager:
         return self.db.query(Position).filter_by(
             session_id=self.session_id,
             symbol=symbol,
-            status='open'
+            status='active'  # Main's model uses 'active' not 'open'
         ).first()
 
     def log_order(
@@ -336,7 +361,7 @@ class StateManager:
         if not self.session_id:
             return {}
 
-        open_positions = self.get_open_positions()
+        active_positions = self.get_open_positions()
         closed_positions = self.db.query(Position).filter_by(
             session_id=self.session_id,
             status='closed'
@@ -348,8 +373,8 @@ class StateManager:
 
         return {
             'session_id': self.session_id,
-            'open_positions': len(open_positions),
+            'active_positions': len(active_positions),
             'closed_positions': len(closed_positions),
             'total_pnl': total_pnl,
-            'open_symbols': [p.symbol for p in open_positions]
+            'active_symbols': [p.symbol for p in active_positions]
         }

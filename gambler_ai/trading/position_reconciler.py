@@ -39,7 +39,7 @@ class PositionReconciler:
         Returns:
             Tuple of (new_alpaca_positions, orphaned_local_positions, matched_symbols)
         """
-        # Get local open positions
+        # Get local active positions
         local_positions = self.state_manager.get_open_positions()
 
         # Build lookup sets
@@ -80,7 +80,7 @@ class PositionReconciler:
             for symbol in orphaned_in_local:
                 local_pos = next(p for p in local_positions if p.symbol == symbol)
                 if verbose:
-                    print(f"  - {symbol}: {local_pos.direction} {float(local_pos.quantity)} @ ${float(local_pos.entry_price):.2f}")
+                    print(f"  - {symbol}: {local_pos.direction} {int(local_pos.qty)} @ ${float(local_pos.entry_price):.2f}")
                 orphaned_local_positions.append(local_pos)
 
         # Verify matched positions
@@ -138,12 +138,14 @@ class PositionReconciler:
         """
         for alpaca_pos in new_alpaca_positions:
             symbol = alpaca_pos['symbol']
-            qty = float(alpaca_pos['qty'])
+            qty = int(alpaca_pos['qty'])  # Main's model uses Integer qty
             avg_entry_price = float(alpaca_pos['avg_entry_price'])
             side = alpaca_pos['side']  # 'long' or 'short'
 
-            # Map Alpaca side to our direction
-            direction = 'LONG' if side == 'long' else 'SHORT'
+            # Map Alpaca side to direction
+            # Main's model uses 'UP' or 'DOWN' for momentum direction
+            # For imported positions, we'll use UP for long, DOWN for short
+            direction = 'UP' if side == 'long' else 'DOWN'
 
             # We don't have full entry details, so use current time
             entry_time = datetime.now(timezone.utc)
@@ -156,7 +158,7 @@ class PositionReconciler:
                 quantity=qty,
                 direction=direction,
                 side='buy' if side == 'long' else 'sell',
-                alpaca_position_id=None  # Alpaca doesn't provide position IDs directly
+                order_id=None  # Don't have order ID for imported positions
             )
 
             print(f"✓ Imported Alpaca position: {symbol} {direction} {qty} @ ${avg_entry_price:.2f}")
