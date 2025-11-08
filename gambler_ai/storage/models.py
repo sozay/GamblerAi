@@ -305,3 +305,54 @@ class Transaction(Base):
             f"<Transaction(symbol={self.symbol}, direction={self.direction}, "
             f"entry_time={self.entry_time}, status={self.status}, pnl={self.pnl})>"
         )
+
+
+class OrderJournal(Base):
+    """Immutable transaction journal for all orders."""
+
+    __tablename__ = "order_journal"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    session_id = Column(String(50), nullable=False, index=True)
+    position_id = Column(Integer, index=True)  # FK to positions table
+
+    # Order details
+    alpaca_order_id = Column(String(50), unique=True, index=True)
+    client_order_id = Column(String(50), unique=True, index=True)
+    symbol = Column(String(10), nullable=False, index=True)
+
+    # Order specifics
+    order_type = Column(String(20), nullable=False)  # 'market', 'limit', 'stop', 'stop_limit'
+    side = Column(String(10), nullable=False)  # 'buy', 'sell'
+    quantity = Column(DECIMAL(12, 4), nullable=False)
+    limit_price = Column(DECIMAL(10, 4))
+    stop_price = Column(DECIMAL(10, 4))
+
+    # Status and execution
+    status = Column(String(20), nullable=False, index=True)  # 'pending', 'filled', 'partial', 'cancelled', 'rejected'
+    filled_qty = Column(DECIMAL(12, 4))
+    filled_avg_price = Column(DECIMAL(10, 4))
+
+    # Timestamps
+    submitted_at = Column(DateTime(timezone=True), nullable=False)
+    filled_at = Column(DateTime(timezone=True))
+    cancelled_at = Column(DateTime(timezone=True))
+
+    # Metadata
+    order_class = Column(String(20))  # 'simple', 'bracket', 'oco', 'oto'
+    time_in_force = Column(String(10))  # 'day', 'gtc', 'ioc', 'fok'
+    extended_hours = Column(String(5))  # 'true' or 'false'
+
+    # Linked orders (for bracket orders)
+    parent_order_id = Column(String(50), index=True)
+
+    # Error tracking
+    rejection_reason = Column(Text)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    def __repr__(self):
+        return (
+            f"<OrderJournal(id={self.alpaca_order_id}, symbol={self.symbol}, "
+            f"side={self.side}, status={self.status})>"
+        )
