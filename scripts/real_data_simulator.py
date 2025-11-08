@@ -548,9 +548,13 @@ class RealDataSimulator:
             # Calculate trading signals from real data with CURRENT capital
             trades = self._calculate_signals(week_data, scanner_type, strategy_name, current_capital)
 
-            # Update capital after each symbol's trades
+            # Update capital after each symbol's trades and add symbol/timestamp info
             for trade in trades:
                 current_capital += trade['pnl_dollars']
+                # Add metadata to each trade
+                trade['symbol'] = symbol
+                trade['week_start'] = week_start
+                trade['week_end'] = week_end
 
             all_trades.extend(trades)
 
@@ -572,6 +576,7 @@ class RealDataSimulator:
             'trades_count': len(all_trades),
             'win_rate': win_rate,
             'capital_end': current_capital,
+            'trades': all_trades,  # NEW: Return all trades for CSV export
         }
 
     def run_simulation(self) -> Dict:
@@ -593,6 +598,7 @@ class RealDataSimulator:
                 total_trades = 0
                 total_wins = 0
                 current_capital = self.initial_capital  # FIXED: Track capital properly
+                all_trades_list = []  # NEW: Collect all trades for CSV export
 
                 # Simulate each week
                 for week_num, (week_start, week_end) in enumerate(self.weekly_periods, 1):
@@ -603,6 +609,14 @@ class RealDataSimulator:
                     cumulative_pnl += week_result['pnl']
                     total_trades += week_result['trades_count']
                     current_capital = week_result['capital_end']  # FIXED: Update capital after each week
+
+                    # NEW: Collect trades with combination info
+                    if 'trades' in week_result:
+                        for trade in week_result['trades']:
+                            trade['scanner'] = scanner_type.value
+                            trade['strategy'] = strategy_name
+                            trade['week_number'] = week_num
+                        all_trades_list.extend(week_result['trades'])
 
                     if week_result['trades_count'] > 0:
                         wins_this_week = int(
@@ -635,12 +649,16 @@ class RealDataSimulator:
                     'win_rate': overall_win_rate,
                     'weekly_pnl': [w['pnl'] for w in weekly_results],
                     'cumulative_pnl': [w['cumulative_pnl'] for w in weekly_results],
+                    'all_trades': all_trades_list,  # NEW: Include all trades
                 }
 
                 logger.info(f"  Completed: P&L=${cumulative_pnl:,.2f}, Return={return_pct:.2f}%")
 
         # Save results
         self._save_results(all_results)
+
+        # NEW: Save all trades to CSV
+        self._save_trades_csv(all_results)
 
         return all_results
 
@@ -662,3 +680,47 @@ class RealDataSimulator:
             json.dump(output, f, indent=2)
 
         logger.info(f"Results saved to {results_file}")
+
+    def _save_trades_csv(self, results: Dict):
+        """Save all trades to CSV file for verification."""
+        import csv
+
+        # Collect all trades from all combinations
+        all_trades = []
+        for combo_name, result in results.items():
+            if 'all_trades' in result and result['all_trades']:
+                all_trades.extend(result['all_trades'])
+
+        if not all_trades:
+            logger.info("No trades to save to CSV")
+            return
+
+        # Save to CSV
+        csv_file = self.results_dir / 'all_trades.csv'
+
+        with open(csv_file, 'w', newline='') as f:
+            fieldnames = [
+                'scanner', 'strategy', 'symbol', 'week_number',
+                'entry_price', 'exit_price',
+                'pnl_pct', 'pnl_dollars',
+                'week_start', 'week_end'
+            ]
+            writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
+            writer.writeheader()
+
+            for trade in all_trades:
+                writer.writerow(trade)
+
+        logger.info(f"✓ Saved {len(all_trades)} trades to {csv_file}")
+
+        # Also save per-combination CSVs
+        for combo_name, result in results.items():
+            if 'all_trades' in result and result['all_trades']:
+                combo_csv = self.results_dir / f'{combo_name}_trades.csv'
+
+                with open(combo_csv, 'w', newline='') as f:
+                    writer = csv.DictWriter(f, fieldnames=fieldnames, extrasaction='ignore')
+                    writer.writeheader()
+                    writer.writerows(result['all_trades'])
+
+                logger.info(f"  ✓ Saved {len(result['all_trades'])} trades to {combo_csv.name}")
