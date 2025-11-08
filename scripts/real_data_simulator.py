@@ -553,8 +553,8 @@ class RealDataSimulator:
                 current_capital += trade['pnl_dollars']
                 # Add metadata to each trade
                 trade['symbol'] = symbol
-                trade['week_start'] = week_start
-                trade['week_end'] = week_end
+                trade['week_start'] = week_start.isoformat()  # Convert to string
+                trade['week_end'] = week_end.isoformat()  # Convert to string
 
             all_trades.extend(trades)
 
@@ -664,6 +664,14 @@ class RealDataSimulator:
 
     def _save_results(self, results: Dict):
         """Save results to JSON."""
+        # Convert datetime objects to strings for JSON serialization
+        results_copy = {}
+        for combo_name, combo_result in results.items():
+            results_copy[combo_name] = combo_result.copy()
+            # Remove all_trades from JSON (saved separately to CSV)
+            if 'all_trades' in results_copy[combo_name]:
+                del results_copy[combo_name]['all_trades']
+
         output = {
             'simulation_date': datetime.now().isoformat(),
             'start_date': self.start_date.isoformat(),
@@ -671,7 +679,8 @@ class RealDataSimulator:
             'weeks_completed': self.total_weeks,
             'total_weeks': self.total_weeks,
             'initial_capital': self.initial_capital,
-            'combinations': results,
+            'position_size_pct': self.position_size_pct,
+            'combinations': results_copy,
             'data_source': 'REAL_MARKET_DATA_ONLY'
         }
 
