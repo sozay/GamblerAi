@@ -6,6 +6,7 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 from enum import Enum
+import uuid
 
 
 class TradeDirection(Enum):
@@ -52,6 +53,10 @@ class Trade:
     # Risk metrics
     max_adverse_excursion: float = 0.0  # Worst drawdown during trade
     max_favorable_excursion: float = 0.0  # Best profit during trade
+
+    # Unique identifier for transaction logging
+    trade_id: str = field(default_factory=lambda: str(uuid.uuid4()))
+    transaction_id: Optional[int] = None  # Database transaction ID
 
     def update_excursions(self, current_price: float):
         """Update max adverse and favorable excursions."""
@@ -133,13 +138,19 @@ class Trade:
 class TradeManager:
     """Manages trades during backtesting."""
 
-    def __init__(self, initial_capital: float = 100000.0, risk_per_trade: float = 0.01):
+    def __init__(
+        self,
+        initial_capital: float = 100000.0,
+        risk_per_trade: float = 0.01,
+        transaction_logger=None,
+    ):
         """
         Initialize trade manager.
 
         Args:
             initial_capital: Starting capital
             risk_per_trade: Risk per trade as fraction of capital (0.01 = 1%)
+            transaction_logger: TransactionLogger instance for logging trades
         """
         self.initial_capital = initial_capital
         self.current_capital = initial_capital
@@ -150,6 +161,9 @@ class TradeManager:
 
         self.equity_curve = []
         self.max_concurrent_trades = 0
+
+        # Transaction logging
+        self.transaction_logger = transaction_logger
 
     def can_open_trade(self, max_concurrent: int = 3) -> bool:
         """Check if we can open a new trade."""
@@ -224,6 +238,25 @@ class TradeManager:
         if len(self.open_trades) > self.max_concurrent_trades:
             self.max_concurrent_trades = len(self.open_trades)
 
+        # Log trade entry to database and files
+        if self.transaction_logger:
+            try:
+                transaction_id = self.transaction_logger.log_trade_entry(
+                    symbol=symbol,
+                    direction=direction.value,
+                    entry_time=entry_time,
+                    entry_price=entry_price,
+                    position_size=position_size,
+                    stop_loss=stop_loss,
+                    target=target,
+                    strategy_name=strategy_name,
+                    trade_id=trade.trade_id,
+                )
+                trade.transaction_id = transaction_id
+            except Exception as e:
+                # Don't fail the trade if logging fails
+                print(f"Warning: Failed to log trade entry: {e}")
+
         return trade
 
     def update_trades(self, current_time: datetime, current_prices: dict):
@@ -269,6 +302,25 @@ class TradeManager:
             "time": trade.exit_time,
             "equity": self.current_capital,
         })
+
+        # Log trade exit to database and files
+        if self.transaction_logger and trade.transaction_id:
+            try:
+                self.transaction_logger.log_trade_exit(
+                    transaction_id=trade.transaction_id,
+                    exit_time=trade.exit_time,
+                    exit_price=trade.exit_price,
+                    exit_reason=trade.exit_reason,
+                    pnl=trade.pnl,
+                    pnl_pct=trade.pnl_pct,
+                    return_pct=trade.return_pct,
+                    max_adverse_excursion=trade.max_adverse_excursion,
+                    max_favorable_excursion=trade.max_favorable_excursion,
+                    trade_id=trade.trade_id,
+                )
+            except Exception as e:
+                # Don't fail the trade if logging fails
+                print(f"Warning: Failed to log trade exit: {e}")
 
     def force_close_all(self, current_time: datetime, current_prices: dict, reason: str = "end_of_backtest"):
         """Force close all open trades at current prices."""
