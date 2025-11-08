@@ -14,18 +14,31 @@ Setup:
 import argparse
 import os
 import time
+import uuid
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 import json
+import sys
+from decimal import Decimal
 
 import pandas as pd
 import requests
+
+# Add project root to path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
+from gambler_ai.storage import (
+    get_analytics_db,
+    TradingSession,
+    Position,
+    PositionCheckpoint,
+)
 
 
 class AlpacaPaperTrader:
     """Paper trading with Alpaca API."""
 
-    def __init__(self, api_key: str, api_secret: str, base_url: str = None):
+    def __init__(self, api_key: str, api_secret: str, base_url: str = None, enable_persistence: bool = True):
         """
         Initialize Alpaca paper trader.
 
@@ -33,6 +46,7 @@ class AlpacaPaperTrader:
             api_key: Alpaca API key
             api_secret: Alpaca API secret
             base_url: API base URL (defaults to paper trading)
+            enable_persistence: Enable state persistence to database
         """
         self.api_key = api_key
         self.api_secret = api_secret
@@ -56,6 +70,23 @@ class AlpacaPaperTrader:
         self.active_positions = {}
         self.closed_trades = []
         self.scanning_symbols = []
+
+        # Session tracking
+        self.session_id = str(uuid.uuid4())
+        self.enable_persistence = enable_persistence
+        self.db = None
+        self.last_checkpoint_time = None
+        self.checkpoint_interval = 30  # seconds
+
+        # Initialize database if persistence enabled
+        if self.enable_persistence:
+            try:
+                self.db = get_analytics_db()
+                print("✓ Database connection established for state persistence")
+            except Exception as e:
+                print(f"⚠ Warning: Could not connect to database: {e}")
+                print("  State persistence disabled")
+                self.enable_persistence = False
 
     def check_connection(self):
         """Test API connection."""
@@ -304,7 +335,7 @@ class AlpacaPaperTrader:
 
         if order:
             # Track position
-            self.active_positions[symbol] = {
+            position_data = {
                 'symbol': symbol,
                 'entry_time': datetime.now(),
                 'entry_price': entry_price,
@@ -315,6 +346,11 @@ class AlpacaPaperTrader:
                 'take_profit': take_profit,
                 'order_id': order['id'],
             }
+            self.active_positions[symbol] = position_data
+
+            # Save to database
+            if self.enable_persistence:
+                self._save_position(symbol, position_data)
 
     def check_positions(self):
         """Check status of active positions."""
@@ -347,6 +383,184 @@ class AlpacaPaperTrader:
                     'direction': pos['direction'],
                     'qty': pos['qty'],
                 })
+
+                # Update position in database
+                if self.enable_persistence:
+                    self._update_position_closed(symbol, pos)
+
+    def _create_session_record(self, symbols: List[str], duration_minutes: int, scan_interval_seconds: int, initial_value: float):
+        """Create initial trading session record in database."""
+        if not self.enable_persistence:
+            return
+
+        try:
+            with self.db.get_session() as session:
+                trading_session = TradingSession(
+                    session_id=self.session_id,
+                    start_time=datetime.now(),
+                    status='active',
+                    symbols=','.join(symbols),
+                    duration_minutes=duration_minutes,
+                    scan_interval_seconds=scan_interval_seconds,
+                    initial_portfolio_value=Decimal(str(initial_value)),
+                )
+                session.add(trading_session)
+                session.commit()
+                print(f"✓ Session {self.session_id[:8]} created in database")
+        except Exception as e:
+            print(f"⚠ Warning: Failed to create session record: {e}")
+
+    def _save_position(self, symbol: str, position_data: Dict):
+        """Save new position to database."""
+        if not self.enable_persistence:
+            return
+
+        try:
+            with self.db.get_session() as session:
+                position = Position(
+                    session_id=self.session_id,
+                    symbol=symbol,
+                    entry_time=position_data['entry_time'],
+                    entry_price=Decimal(str(position_data['entry_price'])),
+                    qty=position_data['qty'],
+                    direction=position_data['direction'],
+                    side=position_data['side'],
+                    stop_loss=Decimal(str(position_data['stop_loss'])),
+                    take_profit=Decimal(str(position_data['take_profit'])),
+                    order_id=position_data['order_id'],
+                    status='active',
+                )
+                session.add(position)
+                session.commit()
+        except Exception as e:
+            print(f"⚠ Warning: Failed to save position {symbol}: {e}")
+
+    def _update_position_closed(self, symbol: str, position_data: Dict):
+        """Update position as closed in database."""
+        if not self.enable_persistence:
+            return
+
+        try:
+            with self.db.get_session() as session:
+                position = session.query(Position).filter_by(
+                    session_id=self.session_id,
+                    symbol=symbol,
+                    status='active'
+                ).first()
+
+                if position:
+                    position.status = 'closed'
+                    position.exit_time = datetime.now()
+                    position.duration_minutes = int((datetime.now() - position.entry_time).seconds / 60)
+                    # Exit reason would need to be determined from Alpaca API
+                    position.exit_reason = 'unknown'
+                    session.commit()
+        except Exception as e:
+            print(f"⚠ Warning: Failed to update position {symbol}: {e}")
+
+    def _save_checkpoint(self):
+        """Save periodic checkpoint of current state."""
+        if not self.enable_persistence:
+            return
+
+        # Only checkpoint every 30 seconds
+        now = datetime.now()
+        if self.last_checkpoint_time and (now - self.last_checkpoint_time).seconds < self.checkpoint_interval:
+            return
+
+        try:
+            # Get current account state
+            account = self.get_account()
+
+            # Prepare positions snapshot
+            positions_snapshot = {
+                symbol: {
+                    'entry_time': pos['entry_time'].isoformat(),
+                    'entry_price': float(pos['entry_price']),
+                    'qty': pos['qty'],
+                    'direction': pos['direction'],
+                    'side': pos['side'],
+                    'stop_loss': float(pos['stop_loss']),
+                    'take_profit': float(pos['take_profit']),
+                    'order_id': pos['order_id'],
+                }
+                for symbol, pos in self.active_positions.items()
+            }
+
+            account_snapshot = {
+                'portfolio_value': float(account['portfolio_value']),
+                'buying_power': float(account['buying_power']),
+                'cash': float(account['cash']),
+            }
+
+            with self.db.get_session() as session:
+                checkpoint = PositionCheckpoint(
+                    session_id=self.session_id,
+                    checkpoint_time=now,
+                    positions_snapshot=positions_snapshot,
+                    account_snapshot=account_snapshot,
+                    active_positions_count=len(self.active_positions),
+                    closed_trades_count=len(self.closed_trades),
+                )
+                session.add(checkpoint)
+                session.commit()
+
+            self.last_checkpoint_time = now
+            print(f"   💾 Checkpoint saved: {len(self.active_positions)} active positions")
+
+        except Exception as e:
+            print(f"⚠ Warning: Failed to save checkpoint: {e}")
+
+    def _finalize_session(self, final_value: float, pnl: float):
+        """Mark session as completed in database."""
+        if not self.enable_persistence:
+            return
+
+        try:
+            with self.db.get_session() as session:
+                trading_session = session.query(TradingSession).filter_by(
+                    session_id=self.session_id
+                ).first()
+
+                if trading_session:
+                    trading_session.end_time = datetime.now()
+                    trading_session.status = 'completed'
+                    trading_session.final_portfolio_value = Decimal(str(final_value))
+                    trading_session.pnl = Decimal(str(pnl))
+                    if trading_session.initial_portfolio_value:
+                        trading_session.pnl_pct = Decimal(str(pnl / float(trading_session.initial_portfolio_value) * 100))
+                    trading_session.total_trades = len(self.closed_trades)
+                    session.commit()
+                    print(f"✓ Session {self.session_id[:8]} finalized in database")
+        except Exception as e:
+            print(f"⚠ Warning: Failed to finalize session: {e}")
+
+    def _check_for_crashed_sessions(self):
+        """Check for crashed sessions and offer recovery."""
+        if not self.enable_persistence:
+            return None
+
+        try:
+            with self.db.get_session() as session:
+                crashed_sessions = session.query(TradingSession).filter_by(
+                    status='active'
+                ).order_by(TradingSession.start_time.desc()).limit(5).all()
+
+                if crashed_sessions:
+                    print("\n⚠ Found active sessions (may have crashed):")
+                    for idx, sess in enumerate(crashed_sessions, 1):
+                        print(f"  {idx}. Session {sess.session_id[:8]} - Started {sess.start_time}")
+                        print(f"     Symbols: {sess.symbols}")
+
+                    # For now, just mark them as crashed
+                    # Future: could offer recovery option
+                    for sess in crashed_sessions:
+                        sess.status = 'crashed'
+                    session.commit()
+                    print("\n  Sessions marked as 'crashed'. Starting new session...\n")
+
+        except Exception as e:
+            print(f"⚠ Warning: Failed to check for crashed sessions: {e}")
 
     def scan_for_signals(self, symbols: List[str]):
         """Scan symbols for momentum signals."""
@@ -395,19 +609,32 @@ class AlpacaPaperTrader:
         """
         self.scanning_symbols = symbols
 
+        # Check for crashed sessions
+        if self.enable_persistence:
+            self._check_for_crashed_sessions()
+
         print("\n" + "=" * 80)
         print("ALPACA PAPER TRADING - LIVE SESSION")
         print("=" * 80)
+        print(f"Session ID: {self.session_id[:8]}")
         print(f"Symbols: {', '.join(symbols)}")
         print(f"Duration: {duration_minutes} minutes")
         print(f"Scan Interval: {scan_interval_seconds} seconds")
         print(f"Strategy: {self.stop_loss_pct}% stop loss, {self.take_profit_pct}% take profit")
+        if self.enable_persistence:
+            print(f"State Persistence: ✓ Enabled (checkpoints every {self.checkpoint_interval}s)")
+        else:
+            print(f"State Persistence: ✗ Disabled")
         print("=" * 80 + "\n")
 
         # Check initial account status
         account = self.get_account()
         initial_value = float(account['portfolio_value'])
         print(f"Starting Portfolio Value: ${initial_value:,.2f}\n")
+
+        # Create session record
+        if self.enable_persistence:
+            self._create_session_record(symbols, duration_minutes, scan_interval_seconds, initial_value)
 
         start_time = datetime.now()
         end_time = start_time + timedelta(minutes=duration_minutes)
@@ -419,6 +646,10 @@ class AlpacaPaperTrader:
 
                 # Check existing positions
                 self.check_positions()
+
+                # Save checkpoint periodically
+                if self.enable_persistence:
+                    self._save_checkpoint()
 
                 # Status update
                 remaining = int((end_time - datetime.now()).seconds / 60)
@@ -450,6 +681,10 @@ class AlpacaPaperTrader:
             for trade in self.closed_trades:
                 duration = (trade['exit_time'] - trade['entry_time']).seconds // 60
                 print(f"  {trade['symbol']}: {trade['direction']}, {duration} min")
+
+        # Finalize session in database
+        if self.enable_persistence:
+            self._finalize_session(final_value, pnl)
 
         print("\n" + "=" * 80 + "\n")
 
