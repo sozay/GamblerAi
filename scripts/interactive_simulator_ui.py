@@ -213,7 +213,7 @@ def simulation_config_section():
     # Additional parameters
     st.markdown("### 💰 Capital & Parameters")
 
-    col1, col2 = st.columns(2)
+    col1, col2, col3 = st.columns(3)
 
     with col1:
         initial_capital = st.number_input(
@@ -225,6 +225,16 @@ def simulation_config_section():
         )
 
     with col2:
+        position_size_pct = st.slider(
+            "Position Size (% of Capital)",
+            min_value=10,
+            max_value=100,
+            value=30,
+            step=5,
+            help="Percentage of available capital to use per trade. 30% is conservative, 100% is all-in aggressive."
+        )
+
+    with col3:
         update_interval = st.slider(
             "Chart Update Speed (seconds)",
             min_value=0.1,
@@ -242,6 +252,7 @@ def simulation_config_section():
         'scanners': [scanner_options[s] for s in selected_scanners],
         'strategies': selected_strategies,
         'initial_capital': initial_capital,
+        'position_size_pct': position_size_pct / 100.0,  # Convert percentage to decimal
         'update_interval': update_interval
     }
 
@@ -361,6 +372,7 @@ def run_simulation_section(config):
                 end_date=config['end_date'],
                 initial_capital=config['initial_capital'],
                 interval=config['interval'],  # Pass the selected interval!
+                position_size_pct=config['position_size_pct'],  # Pass position size %!
                 results_dir="simulation_results_real"
             )
 

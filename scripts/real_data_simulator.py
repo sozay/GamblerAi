@@ -39,6 +39,7 @@ class RealDataSimulator:
         initial_capital: float = 100000.0,
         results_dir: str = "simulation_results_real",
         interval: str = "1h",
+        position_size_pct: float = 0.30,
     ):
         """
         Initialize real data simulator.
@@ -50,11 +51,13 @@ class RealDataSimulator:
             initial_capital: Starting capital
             results_dir: Where to save results
             interval: Data interval (1m, 5m, 15m, 1h, 1d)
+            position_size_pct: Percentage of capital to use per trade (default: 0.30 = 30%)
         """
         self.symbols = symbols
         self.start_date = start_date
         self.end_date = end_date
         self.initial_capital = initial_capital
+        self.position_size_pct = position_size_pct
         self.interval = interval
         self.results_dir = Path(results_dir)
         self.results_dir.mkdir(exist_ok=True)
@@ -337,7 +340,8 @@ class RealDataSimulator:
         self,
         data: pd.DataFrame,
         scanner_type: ScannerType,
-        strategy_name: str
+        strategy_name: str,
+        current_capital: float
     ) -> List[Dict]:
         """
         Calculate trading signals from real data.
@@ -347,7 +351,7 @@ class RealDataSimulator:
         - Maximum 1-3 trades per day per symbol
         - Minimum 30-minute hold period
         - Clear entry/exit criteria
-        - Position sizing based on capital
+        - Position sizing based on CURRENT capital (updates after each trade)
         """
         if data is None or len(data) < 20:
             return []
@@ -363,9 +367,9 @@ class RealDataSimulator:
         available_bars = len(data) - 20  # Bars available after warmup
         max_hold_bars = min(15, max(8, available_bars // 3))  # Allow longer holds
 
-        # Position size: 100% OF CAPITAL (ALL IN - VERY AGGRESSIVE!)
-        # If capital is $100k, trade with $100k. If $10k, trade with $10k.
-        position_size = self.initial_capital * 1.0  # Changed from 0.10 to 1.0
+        # Position size: Based on CURRENT capital (not initial!)
+        # This compounds properly - if capital grows, position size grows
+        position_size = current_capital * self.position_size_pct
 
         # Risk management parameters (OPTIMIZED)
         stop_loss_pct = 0.02  # Exit if loss exceeds 2%
@@ -518,13 +522,16 @@ class RealDataSimulator:
         week_start: datetime,
         week_end: datetime,
         scanner_type: ScannerType,
-        strategy_name: str
+        strategy_name: str,
+        current_capital: float
     ) -> Dict:
         """
         Simulate trading for one week using REAL DATA ONLY.
         Now uses scanner to filter which symbols to trade.
+        Tracks capital properly - position size updates as capital changes.
         """
         all_trades = []
+        capital_at_start = current_capital
 
         # Use scanner to filter/rank symbols - trade only top 3 symbols per week
         selected_symbols = self._rank_symbols_by_scanner(
@@ -538,8 +545,13 @@ class RealDataSimulator:
             if week_data is None:
                 continue
 
-            # Calculate trading signals from real data
-            trades = self._calculate_signals(week_data, scanner_type, strategy_name)
+            # Calculate trading signals from real data with CURRENT capital
+            trades = self._calculate_signals(week_data, scanner_type, strategy_name, current_capital)
+
+            # Update capital after each symbol's trades
+            for trade in trades:
+                current_capital += trade['pnl_dollars']
+
             all_trades.extend(trades)
 
         # Calculate week statistics
@@ -548,6 +560,7 @@ class RealDataSimulator:
                 'pnl': 0,
                 'trades_count': 0,
                 'win_rate': 0,
+                'capital_end': current_capital,
             }
 
         total_pnl = sum(t['pnl_dollars'] for t in all_trades)
@@ -558,6 +571,7 @@ class RealDataSimulator:
             'pnl': total_pnl,
             'trades_count': len(all_trades),
             'win_rate': win_rate,
+            'capital_end': current_capital,
         }
 
     def run_simulation(self) -> Dict:
@@ -578,15 +592,17 @@ class RealDataSimulator:
                 cumulative_pnl = 0
                 total_trades = 0
                 total_wins = 0
+                current_capital = self.initial_capital  # FIXED: Track capital properly
 
                 # Simulate each week
                 for week_num, (week_start, week_end) in enumerate(self.weekly_periods, 1):
                     week_result = self._simulate_week(
-                        week_start, week_end, scanner_type, strategy_name
+                        week_start, week_end, scanner_type, strategy_name, current_capital
                     )
 
                     cumulative_pnl += week_result['pnl']
                     total_trades += week_result['trades_count']
+                    current_capital = week_result['capital_end']  # FIXED: Update capital after each week
 
                     if week_result['trades_count'] > 0:
                         wins_this_week = int(
@@ -602,10 +618,11 @@ class RealDataSimulator:
                         'cumulative_pnl': cumulative_pnl,
                         'trades_count': week_result['trades_count'],
                         'win_rate': week_result['win_rate'],
+                        'capital': current_capital,
                     })
 
                 # Calculate final statistics
-                final_capital = self.initial_capital + cumulative_pnl
+                final_capital = current_capital  # FIXED: Use tracked capital, not calculated
                 return_pct = (cumulative_pnl / self.initial_capital) * 100
                 overall_win_rate = (total_wins / total_trades * 100) if total_trades > 0 else 0
 
