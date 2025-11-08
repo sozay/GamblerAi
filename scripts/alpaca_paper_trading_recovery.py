@@ -85,6 +85,10 @@ class AlpacaPaperTraderWithRecovery:
         self.closed_trades = []
         self.scanning_symbols = []
 
+        # Checkpoint tracking
+        self.last_checkpoint_time = None
+        self.checkpoint_interval = 30  # Create checkpoint every 30 seconds
+
         # Graceful shutdown
         self.shutdown_requested = False
         signal.signal(signal.SIGINT, self._signal_handler)
@@ -202,6 +206,53 @@ class AlpacaPaperTraderWithRecovery:
             # Load positions
             self.load_positions_from_db()
             print(f"✓ Resumed with {len(self.active_positions)} active positions")
+
+            # Try to restore from latest checkpoint
+            checkpoint_state = self.state_manager.restore_from_latest_checkpoint()
+            if checkpoint_state:
+                print(f"  Checkpoint: {checkpoint_state['checkpoint_time']}")
+                if checkpoint_state.get('account_info'):
+                    print(f"  Last known portfolio value: ${checkpoint_state['account_info'].get('portfolio_value', 'N/A')}")
+
+    def create_checkpoint(self):
+        """Create a checkpoint of the current state."""
+        if not self.state_manager:
+            return
+
+        try:
+            # Get current account info
+            account = self.get_account()
+            account_info = {
+                'portfolio_value': float(account['portfolio_value']),
+                'buying_power': float(account['buying_power']),
+                'cash': float(account['cash']),
+                'timestamp': datetime.now(timezone.utc).isoformat()
+            }
+
+            # Strategy parameters
+            strategy_params = {
+                'min_price_change_pct': self.min_price_change_pct,
+                'min_volume_ratio': self.min_volume_ratio,
+                'stop_loss_pct': self.stop_loss_pct,
+                'take_profit_pct': self.take_profit_pct,
+                'position_size': self.position_size
+            }
+
+            # Create checkpoint
+            checkpoint_id = self.state_manager.create_checkpoint(
+                account_info=account_info,
+                strategy_params=strategy_params
+            )
+
+            self.last_checkpoint_time = datetime.now()
+
+            # Optionally print checkpoint info (only every 10th checkpoint to reduce noise)
+            stats = self.state_manager.get_checkpoint_stats()
+            if stats.get('total_checkpoints', 0) % 10 == 0:
+                print(f"   💾 Checkpoint #{stats['total_checkpoints']} created")
+
+        except Exception as e:
+            print(f"⚠ Failed to create checkpoint: {e}")
 
     def get_latest_bars(self, symbols: List[str], timeframe: str = "5Min", limit: int = 100):
         """Get latest bars for symbols."""
@@ -447,6 +498,14 @@ class AlpacaPaperTraderWithRecovery:
                     'qty': pos['qty'],
                 })
 
+    def should_create_checkpoint(self) -> bool:
+        """Check if it's time to create a checkpoint."""
+        if not self.last_checkpoint_time:
+            return True
+
+        elapsed = (datetime.now() - self.last_checkpoint_time).seconds
+        return elapsed >= self.checkpoint_interval
+
     def scan_for_signals(self, symbols: List[str]):
         """Scan symbols for momentum signals."""
         print(f"\n⏰ {datetime.now().strftime('%H:%M:%S')} - Scanning {len(symbols)} symbols...")
@@ -490,6 +549,7 @@ class AlpacaPaperTraderWithRecovery:
         print(f"Symbols: {', '.join(symbols)}")
         print(f"Duration: {duration_minutes} minutes")
         print(f"Scan Interval: {scan_interval_seconds} seconds")
+        print(f"Checkpoint Interval: {self.checkpoint_interval} seconds")
         print(f"Strategy: {self.stop_loss_pct}% stop loss, {self.take_profit_pct}% take profit")
         print(f"Recovery: {'ENABLED' if self.state_manager else 'DISABLED'}")
         print("=" * 80 + "\n")
@@ -521,6 +581,10 @@ class AlpacaPaperTraderWithRecovery:
                 self.scan_for_signals(symbols)
                 self.check_positions()
 
+                # Create periodic checkpoints
+                if self.should_create_checkpoint():
+                    self.create_checkpoint()
+
                 remaining = int((end_time - datetime.now()).seconds / 60)
                 print(f"   Active: {len(self.active_positions)}, Closed: {len(self.closed_trades)}, Time remaining: {remaining} min")
 
@@ -535,14 +599,30 @@ class AlpacaPaperTraderWithRecovery:
 
         # Graceful shutdown
         print("\n⟳ Shutting down gracefully...")
+
+        # Create final checkpoint before shutdown
+        if self.state_manager:
+            print("   Creating final checkpoint...")
+            self.create_checkpoint()
+
         account = self.get_account()
         final_value = float(account['portfolio_value'])
 
         if self.state_manager:
+            # Get checkpoint stats
+            checkpoint_stats = self.state_manager.get_checkpoint_stats()
+            if checkpoint_stats.get('total_checkpoints', 0) > 0:
+                print(f"   Total checkpoints created: {checkpoint_stats['total_checkpoints']}")
+
             self.state_manager.end_session(
                 final_capital=final_value,
                 status='completed' if not self.shutdown_requested else 'crashed'
             )
+
+            # Clean up old checkpoints (keep last 100)
+            deleted = self.state_manager.cleanup_old_checkpoints(keep_count=100)
+            if deleted > 0:
+                print(f"   Cleaned up {deleted} old checkpoints")
 
         # Final report
         print("\n" + "=" * 80)
@@ -577,6 +657,7 @@ def main():
     parser.add_argument("--resume-session", help="Resume specific session ID")
     parser.add_argument("--init-db", action="store_true", help="Initialize database tables")
     parser.add_argument("--reconcile-only", action="store_true", help="Only reconcile positions and exit")
+    parser.add_argument("--checkpoint-interval", type=int, default=30, help="Checkpoint interval in seconds (default: 30)")
 
     args = parser.parse_args()
 
@@ -616,6 +697,9 @@ def main():
             db_session=db_session,
             resume_session_id=args.resume_session
         )
+
+        # Set checkpoint interval
+        trader.checkpoint_interval = args.checkpoint_interval
 
         # Test connection
         if not trader.check_connection():
