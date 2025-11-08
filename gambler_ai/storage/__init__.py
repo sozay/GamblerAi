@@ -11,7 +11,10 @@ from .models import (
     DataQualityLog,
     MomentumEvent,
     PatternStatistic,
+    Position,
+    PositionCheckpoint,
     StockPrice,
+    TradingSession,
 )
 
 __all__ = [
@@ -24,4 +27,7 @@ __all__ = [
     "PatternStatistic",
     "ComputedFeature",
     "DataQualityLog",
+    "TradingSession",
+    "Position",
+    "PositionCheckpoint",
 ]
