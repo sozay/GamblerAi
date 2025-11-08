@@ -252,3 +252,56 @@ class PositionCheckpoint(Base):
             f"<PositionCheckpoint(session={self.session_id}, time={self.checkpoint_time}, "
             f"positions={self.active_positions_count})>"
         )
+
+
+class Transaction(Base):
+    """Log of all trading transactions (entries and exits)."""
+
+    __tablename__ = "transactions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+
+    # Trade identification
+    symbol = Column(String(10), nullable=False, index=True)
+    direction = Column(String(10), nullable=False)  # 'LONG' or 'SHORT'
+    status = Column(String(10), nullable=False, index=True)  # 'OPEN' or 'CLOSED'
+
+    # Entry details
+    entry_time = Column(DateTime(timezone=True), nullable=False, index=True)
+    entry_price = Column(DECIMAL(10, 2), nullable=False)
+    position_size = Column(DECIMAL(15, 4), nullable=False)
+
+    # Stop loss and target
+    stop_loss = Column(DECIMAL(10, 2))
+    target = Column(DECIMAL(10, 2))
+
+    # Exit details (null if trade is still open)
+    exit_time = Column(DateTime(timezone=True), index=True)
+    exit_price = Column(DECIMAL(10, 2))
+    exit_reason = Column(String(50))
+
+    # Performance metrics
+    pnl = Column(DECIMAL(15, 2))
+    pnl_pct = Column(DECIMAL(10, 4))
+    return_pct = Column(DECIMAL(10, 4))
+
+    # Risk metrics
+    max_adverse_excursion = Column(DECIMAL(10, 4))
+    max_favorable_excursion = Column(DECIMAL(10, 4))
+
+    # Trade context
+    strategy_name = Column(String(100), index=True)
+    trading_mode = Column(String(20))  # 'backtest', 'paper', 'live'
+
+    # Duration
+    duration_seconds = Column(Integer)
+
+    # Metadata
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), onupdate=func.now())
+
+    def __repr__(self):
+        return (
+            f"<Transaction(symbol={self.symbol}, direction={self.direction}, "
+            f"entry_time={self.entry_time}, status={self.status}, pnl={self.pnl})>"
+        )

@@ -33,12 +33,20 @@ from gambler_ai.storage import (
     Position,
     PositionCheckpoint,
 )
+from gambler_ai.utils.transaction_logger import TransactionLogger
 
 
 class AlpacaPaperTrader:
     """Paper trading with Alpaca API."""
 
-    def __init__(self, api_key: str, api_secret: str, base_url: str = None, enable_persistence: bool = True):
+    def __init__(
+        self,
+        api_key: str,
+        api_secret: str,
+        base_url: str = None,
+        enable_persistence: bool = True,
+        transaction_logger: Optional[TransactionLogger] = None,
+    ):
         """
         Initialize Alpaca paper trader.
 
@@ -47,6 +55,7 @@ class AlpacaPaperTrader:
             api_secret: Alpaca API secret
             base_url: API base URL (defaults to paper trading)
             enable_persistence: Enable state persistence to database
+            transaction_logger: TransactionLogger instance for logging trades
         """
         self.api_key = api_key
         self.api_secret = api_secret
@@ -77,6 +86,9 @@ class AlpacaPaperTrader:
         self.db = None
         self.last_checkpoint_time = None
         self.checkpoint_interval = 30  # seconds
+
+        # Transaction logging
+        self.transaction_logger = transaction_logger
 
         # Initialize database if persistence enabled
         if self.enable_persistence:
@@ -334,10 +346,12 @@ class AlpacaPaperTrader:
         )
 
         if order:
+            entry_time = datetime.now()
+
             # Track position
             position_data = {
                 'symbol': symbol,
-                'entry_time': datetime.now(),
+                'entry_time': entry_time,
                 'entry_price': entry_price,
                 'qty': qty,
                 'direction': direction,
@@ -345,12 +359,31 @@ class AlpacaPaperTrader:
                 'stop_loss': stop_loss,
                 'take_profit': take_profit,
                 'order_id': order['id'],
+                'transaction_id': None,  # Will be set if logging enabled
             }
             self.active_positions[symbol] = position_data
 
-            # Save to database
+            # Save to database for crash recovery
             if self.enable_persistence:
                 self._save_position(symbol, position_data)
+
+            # Log trade entry for audit trail
+            if self.transaction_logger:
+                try:
+                    transaction_id = self.transaction_logger.log_trade_entry(
+                        symbol=symbol,
+                        direction="LONG" if side == "buy" else "SHORT",
+                        entry_time=entry_time,
+                        entry_price=entry_price,
+                        position_size=qty,
+                        stop_loss=stop_loss,
+                        target=take_profit,
+                        strategy_name=f"momentum_{direction.lower()}",
+                        trade_id=order['id'],
+                    )
+                    self.active_positions[symbol]['transaction_id'] = transaction_id
+                except Exception as e:
+                    print(f"Warning: Failed to log trade entry: {e}")
 
     def check_positions(self):
         """Check status of active positions."""
@@ -366,27 +399,57 @@ class AlpacaPaperTrader:
             if symbol not in position_symbols:
                 # Position closed
                 pos = self.active_positions.pop(symbol)
+                exit_time = datetime.now()
 
                 # Get order details to determine exit reason
                 # (would need to query orders endpoint for full details)
+                exit_price = None  # Would get from Alpaca API
+                exit_reason = "closed"
+
+                duration_minutes = (exit_time - pos['entry_time']).seconds // 60
 
                 print(f"\n✓ Position CLOSED: {symbol}")
                 print(f"   Entry: ${pos['entry_price']:.2f}")
                 print(f"   Direction: {pos['direction']}")
-                print(f"   Duration: {(datetime.now() - pos['entry_time']).seconds // 60} minutes")
+                print(f"   Duration: {duration_minutes} minutes")
 
-                self.closed_trades.append({
+                trade_data = {
                     'symbol': symbol,
                     'entry_time': pos['entry_time'],
-                    'exit_time': datetime.now(),
+                    'exit_time': exit_time,
                     'entry_price': pos['entry_price'],
                     'direction': pos['direction'],
                     'qty': pos['qty'],
-                })
+                }
+                self.closed_trades.append(trade_data)
 
-                # Update position in database
+                # Update position in database for crash recovery
                 if self.enable_persistence:
                     self._update_position_closed(symbol, pos)
+
+                # Log trade exit for audit trail
+                if self.transaction_logger and pos.get('transaction_id'):
+                    try:
+                        # Estimate exit price and P&L
+                        # In real implementation, would get from Alpaca API
+                        estimated_exit = pos['entry_price']  # Placeholder
+                        pnl = 0.0  # Would calculate from actual fills
+                        pnl_pct = 0.0
+
+                        self.transaction_logger.log_trade_exit(
+                            transaction_id=pos['transaction_id'],
+                            exit_time=exit_time,
+                            exit_price=estimated_exit,
+                            exit_reason=exit_reason,
+                            pnl=pnl,
+                            pnl_pct=pnl_pct,
+                            return_pct=pnl_pct,
+                            max_adverse_excursion=0.0,
+                            max_favorable_excursion=0.0,
+                            trade_id=pos['order_id'],
+                        )
+                    except Exception as e:
+                        print(f"Warning: Failed to log trade exit: {e}")
 
     def _create_session_record(self, symbols: List[str], duration_minutes: int, scan_interval_seconds: int, initial_value: float):
         """Create initial trading session record in database."""
