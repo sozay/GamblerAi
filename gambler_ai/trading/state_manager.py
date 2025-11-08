@@ -11,6 +11,7 @@ from typing import Dict, List, Optional
 from sqlalchemy.orm import Session
 
 from gambler_ai.storage.models import TradingSession, Position, OrderJournal
+from gambler_ai.trading.checkpoint_manager import SessionCheckpointManager
 
 
 class StateManager:
@@ -26,6 +27,7 @@ class StateManager:
         self.db = db_session
         self.session_id = None
         self.current_session = None
+        self.checkpoint_manager = SessionCheckpointManager(db_session)
 
     def create_session(
         self,
@@ -378,3 +380,107 @@ class StateManager:
             'total_pnl': total_pnl,
             'active_symbols': [p.symbol for p in active_positions]
         }
+
+    def create_checkpoint(
+        self,
+        account_info: Dict = None,
+        strategy_params: Dict = None
+    ) -> int:
+        """
+        Create a checkpoint of the current session state.
+
+        Args:
+            account_info: Optional account information (portfolio_value, buying_power, etc.)
+            strategy_params: Optional strategy parameters to save
+
+        Returns:
+            Checkpoint ID
+
+        Raises:
+            ValueError: If no active session
+        """
+        if not self.session_id:
+            raise ValueError("No active session")
+
+        return self.checkpoint_manager.create_checkpoint(
+            session_id=self.session_id,
+            account_info=account_info,
+            strategy_params=strategy_params
+        )
+
+    def restore_from_latest_checkpoint(self) -> Optional[Dict]:
+        """
+        Restore state from the most recent checkpoint.
+
+        Returns:
+            Dictionary with restored state or None if no checkpoint exists
+        """
+        if not self.session_id:
+            return None
+
+        checkpoint = self.checkpoint_manager.get_latest_checkpoint(self.session_id)
+
+        if not checkpoint:
+            return None
+
+        restored_state = self.checkpoint_manager.restore_from_checkpoint(checkpoint)
+
+        print(f"✓ Restored from checkpoint created at {checkpoint.checkpoint_time}")
+        print(f"  Active positions: {restored_state['active_count']}")
+        print(f"  Closed trades: {restored_state['closed_count']}")
+
+        return restored_state
+
+    def list_checkpoints(self, limit: int = 10):
+        """
+        List recent checkpoints for the current session.
+
+        Args:
+            limit: Maximum number of checkpoints to return
+
+        Returns:
+            List of checkpoints
+        """
+        if not self.session_id:
+            return []
+
+        return self.checkpoint_manager.list_checkpoints(
+            session_id=self.session_id,
+            limit=limit
+        )
+
+    def get_checkpoint_stats(self) -> Dict:
+        """
+        Get checkpoint statistics for the current session.
+
+        Returns:
+            Dictionary with checkpoint statistics
+        """
+        if not self.session_id:
+            return {}
+
+        return self.checkpoint_manager.get_checkpoint_stats(self.session_id)
+
+    def cleanup_old_checkpoints(
+        self,
+        keep_count: int = 100,
+        older_than_hours: int = None
+    ) -> int:
+        """
+        Clean up old checkpoints for the current session.
+
+        Args:
+            keep_count: Minimum number of recent checkpoints to keep
+            older_than_hours: Optionally delete checkpoints older than N hours
+
+        Returns:
+            Number of checkpoints deleted
+        """
+        if not self.session_id:
+            return 0
+
+        return self.checkpoint_manager.cleanup_old_checkpoints(
+            session_id=self.session_id,
+            keep_count=keep_count,
+            older_than_hours=older_than_hours
+        )
