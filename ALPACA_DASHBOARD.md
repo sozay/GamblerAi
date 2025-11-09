@@ -25,17 +25,17 @@ python -m gambler_ai.api.main
 Or using uvicorn directly:
 
 ```bash
-uvicorn gambler_ai.api.main:app --host 0.0.0.0 --port 8000 --reload
+uvicorn gambler_ai.api.main:app --host 0.0.0.0 --port 9090 --reload
 ```
 
-The API will be available at: `http://localhost:8000`
+The API will be available at: `http://localhost:9090`
 
 ### 2. Open the Dashboard
 
 Open your browser and navigate to:
 
 ```
-http://localhost:8000/static/alpaca_dashboard.html
+http://localhost:9090/static/alpaca_dashboard.html
 ```
 
 That's it! The dashboard will automatically connect to the API and start displaying your trading data.
@@ -69,8 +69,8 @@ The following REST API endpoints are available for Alpaca trading data:
 
 Once the server is running, you can access the interactive API documentation at:
 
-- Swagger UI: `http://localhost:8000/docs`
-- ReDoc: `http://localhost:8000/redoc`
+- Swagger UI: `http://localhost:9090/docs`
+- ReDoc: `http://localhost:9090/redoc`
 
 ## Dashboard Controls
 
@@ -127,7 +127,7 @@ Shows recent trading sessions with:
 
 ## Requirements
 
-- FastAPI server running on port 8000
+- FastAPI server running on port 9090
 - Database with trading data (positions, sessions, transactions)
 - Modern web browser with JavaScript enabled
 - Active internet connection (uses CDN fonts)
@@ -135,14 +135,14 @@ Shows recent trading sessions with:
 ## Troubleshooting
 
 ### Dashboard shows "Failed to load data"
-- Check that the FastAPI server is running on `http://localhost:8000`
+- Check that the FastAPI server is running on `http://localhost:9090`
 - Verify database connection in `config.yaml`
 - Check browser console for error messages
 
 ### No data displayed
 - Make sure you've run the `alpaca_paper_trading.py` script to generate trading data
 - Verify database tables exist and contain data
-- Check API endpoints directly: `http://localhost:8000/api/v1/alpaca/stats`
+- Check API endpoints directly: `http://localhost:9090/api/v1/alpaca/stats`
 
 ### CORS errors
 - The API is configured to allow requests from localhost

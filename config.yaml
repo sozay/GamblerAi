@@ -101,10 +101,11 @@ stocks:
 
 api:
   host: ${API_HOST:0.0.0.0}
-  port: ${API_PORT:8000}
+  port: ${API_PORT:9090}
   cors_origins:
     - http://localhost:3000
     - http://localhost:8501
+    - http://localhost:9090
 
   rate_limiting:
     enabled: true
