@@ -146,7 +146,7 @@ trading_strategies:
       volume_multiplier: 3.0
       relative_strength_period: 20
       use_relative_strength: true
-    position_size: 10000
+    position_size: 1000
     stop_loss_pct: 1.0
     target_bb_middle: true
     max_holding_minutes: 30
@@ -161,7 +161,7 @@ trading_strategies:
       rsi_oversold: 35  # Less oversold for gap reversions
       volume_multiplier: 2.5
       min_gap_pct: 0.5  # Minimum gap size
-    position_size: 10000
+    position_size: 1000
     stop_loss_pct: 1.2  # Wider stop for gaps
     target_bb_middle: true
     max_holding_minutes: 45
@@ -176,7 +176,7 @@ trading_strategies:
       rsi_oversold: 30
       volume_multiplier: 3.0
       min_risk_reward: 2.0  # Only best R/R setups
-    position_size: 10000
+    position_size: 1000
     stop_loss_pct: 1.0
     target_bb_middle: true
     max_holding_minutes: 30
@@ -191,7 +191,7 @@ trading_strategies:
       consolidation_min_bars: 20
       breakout_threshold: 0.5  # % breakout required
       relative_strength_period: 20
-    position_size: 12000  # Larger for breakouts
+    position_size: 1000
     stop_loss_pct: 1.5
     max_holding_minutes: 60  # Longer hold for breakouts
 
@@ -205,7 +205,7 @@ trading_strategies:
       consolidation_min_bars: 20
       breakout_threshold: 0.5
       min_risk_reward: 2.5  # Higher R/R for breakouts
-    position_size: 12000
+    position_size: 1000
     stop_loss_pct: 1.5
     max_holding_minutes: 60
 
