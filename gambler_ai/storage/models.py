@@ -359,3 +359,181 @@ class OrderJournal(Base):
             f"<OrderJournal(id={self.alpaca_order_id}, symbol={self.symbol}, "
             f"side={self.side}, status={self.status})>"
         )
+
+
+class RecordedSession(Base):
+    """Metadata for recorded trading sessions."""
+
+    __tablename__ = "recorded_sessions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    recording_id = Column(String(36), unique=True, nullable=False, index=True)  # UUID
+    session_id = Column(String(36), ForeignKey('trading_sessions.session_id'), nullable=False, index=True)
+    instance_id = Column(Integer, nullable=False, index=True)
+    strategy_name = Column(String(100), nullable=False, index=True)
+
+    # Recording time window
+    recording_start_time = Column(DateTime(timezone=True), nullable=False, index=True)
+    recording_end_time = Column(DateTime(timezone=True))
+
+    # Recording status
+    status = Column(String(20), nullable=False, default='recording', index=True)  # recording, completed, failed
+
+    # Original strategy parameters (stored as JSON for flexibility)
+    original_parameters = Column(JSON)  # All strategy params used during recording
+
+    # Market conditions during recording
+    symbols_recorded = Column(Text)  # Comma-separated list of symbols
+    total_bars_recorded = Column(Integer, default=0)
+    total_events_recorded = Column(Integer, default=0)
+
+    # Summary statistics from original run
+    original_trades = Column(Integer, default=0)
+    original_pnl = Column(DECIMAL(12, 2))
+    original_win_rate = Column(DECIMAL(5, 2))
+
+    # Metadata
+    description = Column(Text)  # User-provided description
+    tags = Column(Text)  # Comma-separated tags for easy searching
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationships
+    market_data = relationship("RecordedMarketData", back_populates="recording", cascade="all, delete-orphan")
+    events = relationship("RecordedEvent", back_populates="recording", cascade="all, delete-orphan")
+    replays = relationship("ReplaySession", back_populates="recording", cascade="all, delete-orphan")
+
+    def __repr__(self):
+        return (
+            f"<RecordedSession(id={self.recording_id}, strategy={self.strategy_name}, "
+            f"status={self.status}, start={self.recording_start_time})>"
+        )
+
+
+class RecordedMarketData(Base):
+    """Market data captured during recording."""
+
+    __tablename__ = "recorded_market_data"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    recording_id = Column(String(36), ForeignKey('recorded_sessions.recording_id'), nullable=False, index=True)
+
+    # Market data
+    symbol = Column(String(10), nullable=False, index=True)
+    timestamp = Column(DateTime(timezone=True), nullable=False, index=True)
+    open = Column(DECIMAL(10, 4), nullable=False)
+    high = Column(DECIMAL(10, 4), nullable=False)
+    low = Column(DECIMAL(10, 4), nullable=False)
+    close = Column(DECIMAL(10, 4), nullable=False)
+    volume = Column(BigInteger, nullable=False)
+
+    # Technical indicators calculated at this bar (stored for exact replay)
+    indicators = Column(JSON)  # RSI, BB, ATR, etc. as computed during recording
+
+    # Sequence number for ordered replay
+    sequence = Column(Integer, nullable=False, index=True)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationship
+    recording = relationship("RecordedSession", back_populates="market_data")
+
+    __table_args__ = (
+        UniqueConstraint("recording_id", "symbol", "timestamp", name="uix_recording_symbol_time"),
+    )
+
+    def __repr__(self):
+        return (
+            f"<RecordedMarketData(recording={self.recording_id}, symbol={self.symbol}, "
+            f"time={self.timestamp}, close={self.close})>"
+        )
+
+
+class RecordedEvent(Base):
+    """Events captured during recording (signals, orders, fills, position changes)."""
+
+    __tablename__ = "recorded_events"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    recording_id = Column(String(36), ForeignKey('recorded_sessions.recording_id'), nullable=False, index=True)
+
+    # Event identification
+    event_type = Column(String(50), nullable=False, index=True)  # SIGNAL_DETECTED, ORDER_PLACED, ORDER_FILLED, etc.
+    timestamp = Column(DateTime(timezone=True), nullable=False, index=True)
+    sequence = Column(Integer, nullable=False, index=True)  # For ordered replay
+
+    # Event context
+    symbol = Column(String(10), index=True)
+
+    # Event data (flexible JSON storage)
+    event_data = Column(JSON, nullable=False)  # Contains all relevant data for the event
+
+    # Decision metadata (why did strategy make this decision?)
+    decision_metadata = Column(JSON)  # Indicator values, scores, reasoning at decision time
+
+    # Market state at event time
+    market_state = Column(JSON)  # Snapshot of market conditions when event occurred
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationship
+    recording = relationship("RecordedSession", back_populates="events")
+
+    def __repr__(self):
+        return (
+            f"<RecordedEvent(recording={self.recording_id}, type={self.event_type}, "
+            f"symbol={self.symbol}, time={self.timestamp})>"
+        )
+
+
+class ReplaySession(Base):
+    """Results from replaying a recorded session with different parameters."""
+
+    __tablename__ = "replay_sessions"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    replay_id = Column(String(36), unique=True, nullable=False, index=True)  # UUID
+    recording_id = Column(String(36), ForeignKey('recorded_sessions.recording_id'), nullable=False, index=True)
+
+    # Replay execution
+    replay_time = Column(DateTime(timezone=True), nullable=False, index=True)
+    status = Column(String(20), nullable=False, default='running', index=True)  # running, completed, failed
+
+    # Modified parameters for this replay
+    modified_parameters = Column(JSON, nullable=False)  # Parameters changed from original
+
+    # Replay results
+    total_trades = Column(Integer, default=0)
+    winning_trades = Column(Integer, default=0)
+    losing_trades = Column(Integer, default=0)
+    total_pnl = Column(DECIMAL(12, 2))
+    win_rate = Column(DECIMAL(5, 2))
+    max_drawdown = Column(DECIMAL(12, 2))
+    sharpe_ratio = Column(DECIMAL(5, 2))
+
+    # Comparison with original
+    trades_diff = Column(Integer)  # Difference in number of trades
+    pnl_diff = Column(DECIMAL(12, 2))  # Difference in P&L
+    win_rate_diff = Column(DECIMAL(5, 2))  # Difference in win rate
+
+    # Detailed comparison data
+    comparison_data = Column(JSON)  # Trade-by-trade comparison, missed signals, extra signals, etc.
+
+    # Events generated during replay
+    replay_events = Column(JSON)  # All events from replay for detailed analysis
+
+    # Metadata
+    description = Column(Text)  # User notes about this replay
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+    # Relationship
+    recording = relationship("RecordedSession", back_populates="replays")
+
+    def __repr__(self):
+        return (
+            f"<ReplaySession(id={self.replay_id}, recording={self.recording_id}, "
+            f"trades={self.total_trades}, pnl={self.total_pnl})>"
+        )

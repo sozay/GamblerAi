@@ -8,7 +8,7 @@ from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
-from gambler_ai.api.routes import analysis, health, patterns, predictions, alpaca_trading
+from gambler_ai.api.routes import analysis, health, patterns, predictions, alpaca_trading, recordings
 from gambler_ai.utils.config import get_config
 from gambler_ai.utils.logging import get_logger
 
@@ -43,6 +43,7 @@ app.include_router(analysis.router, prefix="/api/v1", tags=["Analysis"])
 app.include_router(patterns.router, prefix="/api/v1", tags=["Patterns"])
 app.include_router(predictions.router, prefix="/api/v1", tags=["Predictions"])
 app.include_router(alpaca_trading.router, prefix="/api/v1/alpaca", tags=["Alpaca Trading"])
+app.include_router(recordings.router, tags=["Recordings"])
 
 # Mount static files for dashboard
 static_dir = Path(__file__).parent.parent.parent / "static"
