@@ -7,7 +7,8 @@ Type=simple
 User=ozay
 WorkingDirectory=/home/ozay/GamblerAi
 Environment="PATH=/home/ozay/GamblerAi/venv/bin"
-ExecStart=/home/ozay/GamblerAi/venv/bin/python scripts/alpaca_paper_trading.py \
+Environment="PYTHONUNBUFFERED=1"
+ExecStart=/home/ozay/GamblerAi/venv/bin/python -u scripts/alpaca_paper_trading.py \
   --continuous \
   --instance-id 1 \
   --config config.yaml

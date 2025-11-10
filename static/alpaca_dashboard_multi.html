@@ -390,7 +390,6 @@
             <table id="comparisonTable">
                 <thead>
                     <tr>
-                        <th onclick="sortTable('instance_id')">Instance</th>
                         <th onclick="sortTable('strategy')">Strategy</th>
                         <th onclick="sortTable('active_positions')">Active Positions</th>
                         <th onclick="sortTable('total_trades')">Total Trades</th>
@@ -400,7 +399,7 @@
                     </tr>
                 </thead>
                 <tbody id="comparisonTableBody">
-                    <tr><td colspan="7" class="loading">Loading...</td></tr>
+                    <tr><td colspan="6" class="loading">Loading...</td></tr>
                 </tbody>
             </table>
         </div>
@@ -538,11 +537,18 @@
             return `${hours}h ${mins}m`;
         }
 
-        function getInstanceBadge(instanceId) {
+        function getInstanceBadge(instanceId, strategy = null) {
+            // If strategy not provided, try to look it up from global data
+            if (!strategy && window.instancesData) {
+                const inst = window.instancesData.find(i => i.instance_id === instanceId);
+                strategy = inst ? inst.strategy : null;
+            }
+
+            const displayName = strategy || `Instance ${instanceId}`;
             return `
                 <span class="instance-badge instance-${instanceId}">
                     <span class="instance-dot dot-${instanceId}"></span>
-                    Instance ${instanceId}
+                    ${displayName}
                 </span>
             `;
         }
@@ -554,6 +560,9 @@
         async function loadInstanceComparison() {
             const instances = await fetchAPI('/instances');
             if (!instances) return;
+
+            // Store globally for getInstanceBadge function
+            window.instancesData = instances;
 
             let totalPnl = 0;
             let totalPositions = 0;
@@ -582,8 +591,7 @@
 
                 return `
                     <tr>
-                        <td>${getInstanceBadge(inst.instance_id)}</td>
-                        <td>${inst.strategy || 'Unknown'}</td>
+                        <td>${getInstanceBadge(inst.instance_id, inst.strategy)}</td>
                         <td>${inst.active_positions}</td>
                         <td>${inst.total_trades}</td>
                         <td>${inst.win_rate.toFixed(2)}%</td>

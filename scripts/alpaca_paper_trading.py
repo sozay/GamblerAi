@@ -592,6 +592,8 @@ class AlpacaPaperTrader:
                     duration_minutes=duration_minutes,
                     scan_interval_seconds=scan_interval_seconds,
                     initial_portfolio_value=Decimal(str(initial_value)),
+                    instance_id=self.instance_id,
+                    strategy_name=self.strategy_name if hasattr(self, 'strategy_name') else None,
                 )
                 session.add(trading_session)
                 session.commit()
@@ -770,7 +772,7 @@ class AlpacaPaperTrader:
         if self.scanner and self.scanner_type == 'relative_strength':
             # Use relative strength scanner logic
             filtered_symbols = self._filter_by_relative_strength(symbols, bars_data)
-        elif self.use_relative_strength and hasattr(self, 'use_relative_strength'):
+        elif hasattr(self, 'use_relative_strength') and self.use_relative_strength:
             # Legacy relative strength filtering
             filtered_symbols = self._filter_by_relative_strength(symbols, bars_data)
 
@@ -1030,7 +1032,7 @@ def main():
     symbols = None
     scan_interval = args.interval or 60
 
-    if args.strategy or args.instance_id > 1:
+    if args.config or args.strategy or args.instance_id >= 1:
         # Load config.yaml
         full_config = load_config_file(args.config)
 
