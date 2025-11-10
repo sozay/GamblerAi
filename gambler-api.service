@@ -1,0 +1,17 @@
+[Unit]
+Description=GamblerAI API and Dashboard Server
+After=network.target
+
+[Service]
+Type=simple
+User=ozay
+WorkingDirectory=/home/ozay/GamblerAi
+Environment="PATH=/home/ozay/GamblerAi/venv/bin"
+ExecStart=/home/ozay/GamblerAi/venv/bin/uvicorn gambler_ai.api.main:app --host 0.0.0.0 --port 9090
+Restart=always
+RestartSec=10
+StandardOutput=append:/home/ozay/GamblerAi/logs/api.log
+StandardError=append:/home/ozay/GamblerAi/logs/api.error.log
+
+[Install]
+WantedBy=multi-user.target

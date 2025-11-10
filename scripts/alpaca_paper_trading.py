@@ -23,6 +23,7 @@ from decimal import Decimal
 
 import pandas as pd
 import requests
+from dotenv import load_dotenv
 
 # Add project root to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -34,6 +35,8 @@ from gambler_ai.storage import (
     PositionCheckpoint,
 )
 from gambler_ai.utils.transaction_logger import TransactionLogger
+from gambler_ai.analysis.mean_reversion_detector import MeanReversionDetector
+from gambler_ai.analysis.indicators import calculate_bollinger_bands, calculate_rsi
 
 
 class AlpacaPaperTrader:
@@ -68,12 +71,24 @@ class AlpacaPaperTrader:
             'accept': 'application/json',
         }
 
-        # Strategy parameters
-        self.min_price_change_pct = 2.0
-        self.min_volume_ratio = 2.0
-        self.stop_loss_pct = 2.0
-        self.take_profit_pct = 4.0
+        # Mean Reversion Strategy parameters
+        self.strategy_name = "Mean Reversion"
+        self.bb_period = 20
+        self.bb_std = 2.5
+        self.rsi_oversold = 30
+        self.rsi_overbought = 70
+        self.stop_loss_pct = 1.0  # Tighter stop for mean reversion
+        self.target_bb_middle = True  # Target middle BB band
         self.position_size = 10000  # $10k per trade
+
+        # Initialize mean reversion detector
+        self.mean_reversion = MeanReversionDetector(
+            bb_period=self.bb_period,
+            bb_std=self.bb_std,
+            rsi_oversold=self.rsi_oversold,
+            rsi_overbought=self.rsi_overbought,
+            volume_multiplier=3.0,
+        )
 
         # State
         self.active_positions = {}
@@ -185,14 +200,14 @@ class AlpacaPaperTrader:
             print(f"Error getting bars: {e}")
             return {}
 
-    def detect_momentum(self, symbol: str, bars: List[Dict]) -> Optional[Dict]:
+    def detect_mean_reversion(self, symbol: str, bars: List[Dict]) -> Optional[Dict]:
         """
-        Detect momentum event in bars.
+        Detect mean reversion opportunities using RSI and Bollinger Bands.
 
         Returns:
-            Dict with event details if momentum detected, None otherwise
+            Dict with setup details if opportunity detected, None otherwise
         """
-        if len(bars) < 20:
+        if len(bars) < max(self.bb_period, 14) + 5:  # Need enough data for indicators
             return None
 
         # Convert to DataFrame
@@ -200,41 +215,45 @@ class AlpacaPaperTrader:
         df['t'] = pd.to_datetime(df['t'])
         df = df.sort_values('t')
 
-        # Calculate volume ratio
-        df['avg_volume'] = df['v'].rolling(window=20).mean()
-        df['volume_ratio'] = df['v'] / df['avg_volume']
+        # Rename columns to match expected format
+        df = df.rename(columns={
+            't': 'timestamp',
+            'o': 'open',
+            'h': 'high',
+            'l': 'low',
+            'c': 'close',
+            'v': 'volume'
+        })
 
-        # Check last 5 bars for momentum
-        if len(df) < 5:
+        # Detect setups using mean reversion detector
+        try:
+            setups = self.mean_reversion.detect_setups(df)
+        except Exception as e:
+            print(f"  Error detecting mean reversion for {symbol}: {e}")
             return None
 
-        window = df.tail(5)
-
-        price_change_pct = (
-            (window.iloc[-1]['c'] - window.iloc[0]['o']) / window.iloc[0]['o'] * 100
-        )
-
-        avg_vol_ratio = window['volume_ratio'].mean()
-
-        if pd.isna(avg_vol_ratio):
+        if not setups:
             return None
 
-        if (
-            abs(price_change_pct) >= self.min_price_change_pct
-            and avg_vol_ratio >= self.min_volume_ratio
-        ):
-            direction = "UP" if price_change_pct > 0 else "DOWN"
+        # Get most recent setup
+        latest_setup = setups[-1]
 
-            return {
-                'symbol': symbol,
-                'timestamp': window.iloc[-1]['t'],
-                'direction': direction,
-                'price_change_pct': abs(price_change_pct),
-                'volume_ratio': avg_vol_ratio,
-                'entry_price': float(window.iloc[-1]['c']),
-            }
+        # Only trade LONG positions for now (buying oversold)
+        if latest_setup['direction'] != 'LONG':
+            return None
 
-        return None
+        return {
+            'symbol': symbol,
+            'timestamp': latest_setup['timestamp'],
+            'direction': 'LONG',
+            'entry_price': latest_setup['entry_price'],
+            'target_price': latest_setup['target'],
+            'stop_loss': latest_setup['stop_loss'],
+            'rsi': latest_setup['rsi'],
+            'bb_distance_pct': latest_setup['bb_distance_pct'],
+            'volume_ratio': latest_setup['volume_ratio'],
+            'strategy': 'Mean Reversion'
+        }
 
     def place_order(
         self,
@@ -643,12 +662,12 @@ class AlpacaPaperTrader:
             if not bars:
                 continue
 
-            # Check for momentum
-            event = self.detect_momentum(symbol, bars)
+            # Check for mean reversion signal
+            event = self.detect_mean_reversion(symbol, bars)
 
             if event:
                 signals_found += 1
-                print(f"   📊 {symbol}: {event['direction']} {event['price_change_pct']:.2f}% move, {event['volume_ratio']:.1f}x volume")
+                print(f"   📊 {symbol}: {event['direction']} RSI={event['rsi']:.1f}, BB Distance={event['bb_distance_pct']:.1f}%, Vol={event['volume_ratio']:.1f}x")
 
                 # Enter position
                 self.enter_position(event)
@@ -681,9 +700,9 @@ class AlpacaPaperTrader:
         print("=" * 80)
         print(f"Session ID: {self.session_id[:8]}")
         print(f"Symbols: {', '.join(symbols)}")
-        print(f"Duration: {duration_minutes} minutes")
+        print(f"Duration: {'Continuous' if duration_minutes == 0 else f'{duration_minutes} minutes'}")
         print(f"Scan Interval: {scan_interval_seconds} seconds")
-        print(f"Strategy: {self.stop_loss_pct}% stop loss, {self.take_profit_pct}% take profit")
+        print(f"Strategy: Mean Reversion (RSI<{self.rsi_oversold}, BB {self.bb_std}σ, {self.stop_loss_pct}% stop)")
         if self.enable_persistence:
             print(f"State Persistence: ✓ Enabled (checkpoints every {self.checkpoint_interval}s)")
         else:
@@ -700,10 +719,15 @@ class AlpacaPaperTrader:
             self._create_session_record(symbols, duration_minutes, scan_interval_seconds, initial_value)
 
         start_time = datetime.now()
-        end_time = start_time + timedelta(minutes=duration_minutes)
+        # If duration is 0, run indefinitely
+        end_time = start_time + timedelta(minutes=duration_minutes) if duration_minutes > 0 else None
 
         try:
-            while datetime.now() < end_time:
+            while True:
+                # Check if we should stop (only if not continuous mode)
+                if end_time and datetime.now() >= end_time:
+                    break
+
                 # Scan for signals
                 self.scan_for_signals(symbols)
 
@@ -715,8 +739,12 @@ class AlpacaPaperTrader:
                     self._save_checkpoint()
 
                 # Status update
-                remaining = int((end_time - datetime.now()).seconds / 60)
-                print(f"   Active positions: {len(self.active_positions)}, Closed trades: {len(self.closed_trades)}, Time remaining: {remaining} min")
+                if end_time:
+                    remaining = int((end_time - datetime.now()).seconds / 60)
+                    print(f"   Active positions: {len(self.active_positions)}, Closed trades: {len(self.closed_trades)}, Time remaining: {remaining} min")
+                else:
+                    runtime = int((datetime.now() - start_time).total_seconds() / 60)
+                    print(f"   Active positions: {len(self.active_positions)}, Closed trades: {len(self.closed_trades)}, Runtime: {runtime} min")
 
                 # Wait before next scan
                 time.sleep(scan_interval_seconds)
@@ -753,12 +781,16 @@ class AlpacaPaperTrader:
 
 
 def main():
+    # Load environment variables from .env file
+    load_dotenv()
+
     parser = argparse.ArgumentParser(description="Alpaca Paper Trading")
     parser.add_argument("--api-key", help="Alpaca API Key (or set ALPACA_API_KEY env var)")
     parser.add_argument("--api-secret", help="Alpaca API Secret (or set ALPACA_API_SECRET env var)")
     parser.add_argument("--symbols", default="AAPL,MSFT,GOOGL,TSLA,NVDA", help="Symbols to trade")
-    parser.add_argument("--duration", type=int, default=60, help="Duration in minutes")
+    parser.add_argument("--duration", type=int, default=60, help="Duration in minutes (0 for continuous)")
     parser.add_argument("--interval", type=int, default=60, help="Scan interval in seconds")
+    parser.add_argument("--continuous", action="store_true", help="Run continuously (same as --duration 0)")
 
     args = parser.parse_args()
 
@@ -781,6 +813,9 @@ def main():
     # Parse symbols
     symbols = [s.strip().upper() for s in args.symbols.split(",")]
 
+    # Determine duration (0 or --continuous means run indefinitely)
+    duration_minutes = 0 if args.continuous else args.duration
+
     # Create trader
     trader = AlpacaPaperTrader(api_key, api_secret)
 
@@ -790,12 +825,12 @@ def main():
         return
 
     print("\n✓ Ready to start paper trading!\n")
-    input("Press ENTER to begin...")
+    # input("Press ENTER to begin...")  # Commented out for automated runs
 
     # Run paper trading
     trader.run_paper_trading(
         symbols=symbols,
-        duration_minutes=args.duration,
+        duration_minutes=duration_minutes,
         scan_interval_seconds=args.interval,
     )
 

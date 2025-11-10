@@ -25,7 +25,7 @@ router = APIRouter()
 
 # Database setup
 config = get_config()
-db_url = config.get("database.url")
+db_url = config.analytics_db_url
 engine = create_engine(db_url)
 SessionLocal = sessionmaker(bind=engine)
 

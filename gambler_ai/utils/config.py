@@ -105,20 +105,14 @@ class Config:
     @property
     def timeseries_db_url(self) -> str:
         """Get TimescaleDB connection URL."""
-        db_config = self._config_data["database"]["timeseries"]
-        return (
-            f"postgresql://{db_config['user']}:{db_config['password']}"
-            f"@{db_config['host']}:{db_config['port']}/{db_config['name']}"
-        )
+        # Use SQLite instead of PostgreSQL (no installation needed)
+        return "sqlite:///./data/timeseries.db"
 
     @property
     def analytics_db_url(self) -> str:
-        """Get Analytics PostgreSQL connection URL."""
-        db_config = self._config_data["database"]["analytics"]
-        return (
-            f"postgresql://{db_config['user']}:{db_config['password']}"
-            f"@{db_config['host']}:{db_config['port']}/{db_config['name']}"
-        )
+        """Get Analytics database connection URL."""
+        # Use SQLite instead of PostgreSQL (no installation needed)
+        return "sqlite:///./data/analytics.db"
 
     @property
     def redis_url(self) -> str:
