@@ -1,0 +1,20 @@
+[Unit]
+Description=GamblerAI Trading Bot - Instance 1 (Mean Reversion + Relative Strength)
+After=network.target
+
+[Service]
+Type=simple
+User=ozay
+WorkingDirectory=/home/ozay/GamblerAi
+Environment="PATH=/home/ozay/GamblerAi/venv/bin"
+ExecStart=/home/ozay/GamblerAi/venv/bin/python scripts/alpaca_paper_trading.py \
+  --continuous \
+  --instance-id 1 \
+  --config config.yaml
+Restart=always
+RestartSec=15
+StandardOutput=append:/home/ozay/GamblerAi/logs/trading-1.log
+StandardError=append:/home/ozay/GamblerAi/logs/trading-1.error.log
+
+[Install]
+WantedBy=multi-user.target

@@ -169,6 +169,8 @@ class TradingSession(Base):
 
     id = Column(Integer, primary_key=True, autoincrement=True)
     session_id = Column(String(36), unique=True, nullable=False, index=True)  # UUID
+    instance_id = Column(Integer, nullable=False, default=1, index=True)  # Multi-instance support
+    strategy_name = Column(String(100), index=True)  # Strategy identifier
     start_time = Column(DateTime(timezone=True), nullable=False, index=True)
     end_time = Column(DateTime(timezone=True))
     status = Column(String(20), nullable=False, default='active', index=True)  # active, completed, crashed
@@ -180,6 +182,7 @@ class TradingSession(Base):
     pnl = Column(DECIMAL(12, 2))
     pnl_pct = Column(DECIMAL(5, 2))
     total_trades = Column(Integer, default=0)
+    allocated_capital = Column(DECIMAL(12, 2))  # Capital allocated to this instance
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

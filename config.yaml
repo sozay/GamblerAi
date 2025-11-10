@@ -127,3 +127,154 @@ dashboard:
   title: "GamblerAI - Momentum Analysis Dashboard"
   refresh_interval: 30  # seconds
   max_events_display: 100
+
+# ============================================================
+# MULTI-INSTANCE TRADING CONFIGURATION
+# ============================================================
+
+# Strategy Configurations
+trading_strategies:
+  mean-reversion-rs:
+    name: "Mean Reversion + Relative Strength"
+    primary_detector: MeanReversionDetector
+    scanner_type: relative_strength
+    parameters:
+      bb_period: 20
+      bb_std: 2.5
+      rsi_oversold: 30
+      rsi_overbought: 70
+      volume_multiplier: 3.0
+      relative_strength_period: 20
+      use_relative_strength: true
+    position_size: 1000
+    stop_loss_pct: 1.0
+    target_bb_middle: true
+    max_holding_minutes: 30
+
+  gap-mean-reversion:
+    name: "Gap Scanner + Mean Reversion"
+    primary_detector: MeanReversionDetector
+    scanner_type: gap_scanner
+    parameters:
+      bb_period: 20
+      bb_std: 2.0  # Tighter for gap plays
+      rsi_oversold: 35  # Less oversold for gap reversions
+      volume_multiplier: 2.5
+      min_gap_pct: 0.5  # Minimum gap size
+    position_size: 1000
+    stop_loss_pct: 1.2  # Wider stop for gaps
+    target_bb_middle: true
+    max_holding_minutes: 45
+
+  best-setup-mean-reversion:
+    name: "Best Setup + Mean Reversion"
+    primary_detector: MeanReversionDetector
+    scanner_type: best_setups
+    parameters:
+      bb_period: 20
+      bb_std: 2.5
+      rsi_oversold: 30
+      volume_multiplier: 3.0
+      min_risk_reward: 2.0  # Only best R/R setups
+    position_size: 1000
+    stop_loss_pct: 1.0
+    target_bb_middle: true
+    max_holding_minutes: 30
+
+  rs-volatility-breakout:
+    name: "Relative Strength + Volatility Breakout"
+    primary_detector: VolatilityBreakoutDetector
+    scanner_type: relative_strength
+    parameters:
+      atr_period: 14
+      atr_compression_ratio: 0.5
+      consolidation_min_bars: 20
+      breakout_threshold: 0.5  # % breakout required
+      relative_strength_period: 20
+    position_size: 1000
+    stop_loss_pct: 1.5
+    max_holding_minutes: 60  # Longer hold for breakouts
+
+  best-setup-volatility:
+    name: "Best Setup + Volatility Breakout"
+    primary_detector: VolatilityBreakoutDetector
+    scanner_type: best_setups
+    parameters:
+      atr_period: 14
+      atr_compression_ratio: 0.5
+      consolidation_min_bars: 20
+      breakout_threshold: 0.5
+      min_risk_reward: 2.5  # Higher R/R for breakouts
+    position_size: 1000
+    stop_loss_pct: 1.5
+    max_holding_minutes: 60
+
+# Trading Instance Configurations
+trading_instances:
+  1:
+    name: "Mean Reversion + Relative Strength"
+    strategy: mean-reversion-rs
+    symbols: [AAPL, MSFT, GOOGL, AMZN, TSLA, NVDA, META, AMD]
+    interval_seconds: 60
+    allocated_capital: 50000
+    max_positions: 8
+    description: "Bull market mean reversion on relative strength leaders"
+
+  2:
+    name: "Gap Scanner + Mean Reversion"
+    strategy: gap-mean-reversion
+    symbols: [SPY, QQQ, IWM, NFLX, ABNB, PYPL, SQ, COIN]
+    interval_seconds: 45
+    allocated_capital: 45000
+    max_positions: 6
+    description: "Gap fill plays with mean reversion confirmation"
+
+  3:
+    name: "Best Setup + Mean Reversion"
+    strategy: best-setup-mean-reversion
+    symbols: [ADBE, CSCO, INTC, QCOM, AVGO, TXN, MU, AMAT]
+    interval_seconds: 60
+    allocated_capital: 50000
+    max_positions: 8
+    description: "High R/R mean reversion setups only"
+
+  4:
+    name: "Relative Strength + Volatility Breakout"
+    strategy: rs-volatility-breakout
+    symbols: [ASML, GILD, PEP, CMCSA, ORCL, CRM, NOW, SHOP]
+    interval_seconds: 45
+    allocated_capital: 48000
+    max_positions: 6
+    description: "Breakouts from consolidation on market leaders"
+
+  5:
+    name: "Best Setup + Volatility Breakout"
+    strategy: best-setup-volatility
+    symbols: [SBUX, COST, PG, KO, NKE, DIS, UNH, JNJ]
+    interval_seconds: 60
+    allocated_capital: 50000
+    max_positions: 6
+    description: "Best volatility breakout setups with optimal R/R"
+
+# Portfolio-Wide Risk Management
+portfolio_risk_management:
+  max_total_positions: 40
+  max_daily_loss_pct: 10.0
+  max_instance_daily_loss_pct: 5.0
+  min_available_cash_pct: 20.0
+  circuit_breaker:
+    enable: true
+    consecutive_losses: 10
+    auto_resume_next_day: true
+
+# Multi-Instance Monitoring
+multi_instance_monitoring:
+  enable_comparison: true
+  comparison_metrics:
+    - win_rate
+    - avg_pnl
+    - sharpe_ratio
+    - max_drawdown
+  enable_alerts: true
+  alert_on_daily_loss: true
+  alert_on_circuit_breaker: true

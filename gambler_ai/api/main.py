@@ -4,6 +4,7 @@ FastAPI application main entry point.
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from pathlib import Path
 
@@ -47,6 +48,13 @@ app.include_router(alpaca_trading.router, prefix="/api/v1/alpaca", tags=["Alpaca
 static_dir = Path(__file__).parent.parent.parent / "static"
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+
+# Root redirect to multi-instance dashboard
+@app.get("/")
+async def root():
+    """Redirect root URL to multi-instance dashboard."""
+    return RedirectResponse(url="/static/alpaca_dashboard_multi.html")
 
 
 @app.on_event("startup")
