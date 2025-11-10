@@ -24,6 +24,7 @@ from decimal import Decimal
 import pandas as pd
 import requests
 from dotenv import load_dotenv
+import yaml
 
 # Add project root to path
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
@@ -36,6 +37,7 @@ from gambler_ai.storage import (
 )
 from gambler_ai.utils.transaction_logger import TransactionLogger
 from gambler_ai.analysis.mean_reversion_detector import MeanReversionDetector
+from gambler_ai.analysis.volatility_breakout_detector import VolatilityBreakoutDetector
 from gambler_ai.analysis.indicators import calculate_bollinger_bands, calculate_rsi
 from gambler_ai.analysis.stock_scanner import StockScanner, ScannerType
 
@@ -50,6 +52,8 @@ class AlpacaPaperTrader:
         base_url: str = None,
         enable_persistence: bool = True,
         transaction_logger: Optional[TransactionLogger] = None,
+        instance_id: int = 1,
+        config_dict: Optional[Dict] = None,
     ):
         """
         Initialize Alpaca paper trader.
@@ -60,11 +64,16 @@ class AlpacaPaperTrader:
             base_url: API base URL (defaults to paper trading)
             enable_persistence: Enable state persistence to database
             transaction_logger: TransactionLogger instance for logging trades
+            instance_id: Instance ID for multi-instance tracking
+            config_dict: Configuration dictionary from config.yaml
         """
         self.api_key = api_key
         self.api_secret = api_secret
         self.base_url = base_url or "https://paper-api.alpaca.markets"
         self.data_url = "https://data.alpaca.markets"
+
+        self.instance_id = instance_id
+        self.log_prefix = f"[INST-{instance_id}]"
 
         self.headers = {
             'APCA-API-KEY-ID': api_key,
@@ -72,28 +81,17 @@ class AlpacaPaperTrader:
             'accept': 'application/json',
         }
 
-        # Mean Reversion + Relative Strength Strategy parameters
-        self.strategy_name = "Mean Reversion + Relative Strength"
-        self.bb_period = 20
-        self.bb_std = 2.5
-        self.rsi_oversold = 30
-        self.rsi_overbought = 70
-        self.stop_loss_pct = 1.0  # Tighter stop for mean reversion
-        self.target_bb_middle = True  # Target middle BB band
-        self.position_size = 10000  # $10k per trade
+        # Load configuration or use defaults
+        if config_dict:
+            self._load_config(config_dict)
+        else:
+            self._load_default_config()
 
-        # Relative Strength parameters
-        self.relative_strength_period = 20  # 20-bar lookback for RS calculation
-        self.use_relative_strength = True  # Filter stocks by relative strength vs SPY
+        # Initialize detector based on config
+        self._initialize_detector()
 
-        # Initialize mean reversion detector
-        self.mean_reversion = MeanReversionDetector(
-            bb_period=self.bb_period,
-            bb_std=self.bb_std,
-            rsi_oversold=self.rsi_oversold,
-            rsi_overbought=self.rsi_overbought,
-            volume_multiplier=3.0,
-        )
+        # Initialize scanner if configured
+        self._initialize_scanner()
 
         # State
         self.active_positions = {}
@@ -114,15 +112,113 @@ class AlpacaPaperTrader:
         if self.enable_persistence:
             try:
                 self.db = get_analytics_db()
-                print("✓ Database connection established for state persistence")
+                print(f"{self.log_prefix} ✓ Database connection established for state persistence")
             except Exception as e:
-                print(f"⚠ Warning: Could not connect to database: {e}")
-                print("  State persistence disabled")
+                print(f"{self.log_prefix} ⚠ Warning: Could not connect to database: {e}")
+                print(f"{self.log_prefix}   State persistence disabled")
                 self.enable_persistence = False
+
+    def _load_config(self, config_dict: Dict):
+        """Load configuration from config dict."""
+        # Strategy configuration
+        self.strategy_name = config_dict.get('name', 'Unknown Strategy')
+        self.primary_detector = config_dict.get('primary_detector', 'MeanReversionDetector')
+        self.scanner_type = config_dict.get('scanner_type')
+        self.strategy_parameters = config_dict.get('parameters', {})
+
+        # Position sizing and risk management
+        self.position_size = config_dict.get('position_size', 10000)
+        self.stop_loss_pct = config_dict.get('stop_loss_pct', 1.0)
+        self.target_bb_middle = config_dict.get('target_bb_middle', True)
+        self.max_holding_minutes = config_dict.get('max_holding_minutes', 30)
+
+        # Extract detector-specific parameters
+        if self.primary_detector == 'MeanReversionDetector':
+            self.bb_period = self.strategy_parameters.get('bb_period', 20)
+            self.bb_std = self.strategy_parameters.get('bb_std', 2.5)
+            self.rsi_oversold = self.strategy_parameters.get('rsi_oversold', 30)
+            self.rsi_overbought = self.strategy_parameters.get('rsi_overbought', 70)
+            self.volume_multiplier = self.strategy_parameters.get('volume_multiplier', 3.0)
+            self.relative_strength_period = self.strategy_parameters.get('relative_strength_period', 20)
+            self.use_relative_strength = self.strategy_parameters.get('use_relative_strength', False)
+        elif self.primary_detector == 'VolatilityBreakoutDetector':
+            self.atr_period = self.strategy_parameters.get('atr_period', 14)
+            self.atr_compression_ratio = self.strategy_parameters.get('atr_compression_ratio', 0.5)
+            self.consolidation_min_bars = self.strategy_parameters.get('consolidation_min_bars', 20)
+            self.breakout_threshold = self.strategy_parameters.get('breakout_threshold', 0.5)
+            self.volume_multiplier = self.strategy_parameters.get('volume_multiplier', 2.0)
+            self.relative_strength_period = self.strategy_parameters.get('relative_strength_period', 20)
+
+    def _load_default_config(self):
+        """Load default configuration (backward compatibility)."""
+        self.strategy_name = "Mean Reversion + Relative Strength"
+        self.primary_detector = "MeanReversionDetector"
+        self.scanner_type = None
+        self.strategy_parameters = {}
+
+        self.bb_period = 20
+        self.bb_std = 2.5
+        self.rsi_oversold = 30
+        self.rsi_overbought = 70
+        self.stop_loss_pct = 1.0
+        self.target_bb_middle = True
+        self.position_size = 10000
+        self.max_holding_minutes = 30
+
+        self.relative_strength_period = 20
+        self.use_relative_strength = True
+        self.volume_multiplier = 3.0
+
+    def _initialize_detector(self):
+        """Initialize the primary detector based on configuration."""
+        if self.primary_detector == 'MeanReversionDetector':
+            self.detector = MeanReversionDetector(
+                bb_period=self.bb_period,
+                bb_std=self.bb_std,
+                rsi_oversold=self.rsi_oversold,
+                rsi_overbought=self.rsi_overbought,
+                volume_multiplier=self.volume_multiplier,
+            )
+            print(f"{self.log_prefix} ✓ Initialized MeanReversionDetector (BB={self.bb_period}, σ={self.bb_std}, RSI<{self.rsi_oversold})")
+        elif self.primary_detector == 'VolatilityBreakoutDetector':
+            self.detector = VolatilityBreakoutDetector(
+                atr_period=self.atr_period,
+                atr_compression_ratio=self.atr_compression_ratio,
+                consolidation_min_bars=self.consolidation_min_bars,
+                breakout_threshold_pct=self.breakout_threshold,
+                volume_multiplier=self.volume_multiplier,
+            )
+            print(f"{self.log_prefix} ✓ Initialized VolatilityBreakoutDetector (ATR={self.atr_period}, compression={self.atr_compression_ratio})")
+        else:
+            raise ValueError(f"Unknown detector type: {self.primary_detector}")
+
+    def _initialize_scanner(self):
+        """Initialize stock scanner if configured."""
+        self.scanner = None
+        if self.scanner_type:
+            try:
+                # Map string scanner_type to ScannerType enum
+                scanner_type_map = {
+                    'relative_strength': ScannerType.RELATIVE_STRENGTH,
+                    'gap_scanner': ScannerType.GAP_SCANNER,
+                    'best_setups': ScannerType.BEST_SETUPS,
+                    'top_movers': ScannerType.TOP_MOVERS,
+                    'high_volume': ScannerType.HIGH_VOLUME,
+                    'volatility_range': ScannerType.VOLATILITY_RANGE,
+                }
+
+                scanner_enum = scanner_type_map.get(self.scanner_type)
+                if scanner_enum:
+                    self.scanner = StockScanner(scanner_type=scanner_enum)
+                    print(f"{self.log_prefix} ✓ Initialized StockScanner: {self.scanner_type}")
+                else:
+                    print(f"{self.log_prefix} ⚠ Warning: Unknown scanner_type '{self.scanner_type}', skipping scanner")
+            except Exception as e:
+                print(f"{self.log_prefix} ⚠ Warning: Failed to initialize scanner: {e}")
 
     def check_connection(self):
         """Test API connection."""
-        print("Testing Alpaca Paper Trading connection...")
+        print(f"{self.log_prefix} Testing Alpaca Paper Trading connection...")
 
         try:
             response = requests.get(
@@ -132,19 +228,19 @@ class AlpacaPaperTrader:
 
             if response.status_code == 200:
                 account = response.json()
-                print("✓ Connected to Alpaca Paper Trading")
-                print(f"  Account Status: {account['status']}")
-                print(f"  Buying Power: ${float(account['buying_power']):,.2f}")
-                print(f"  Cash: ${float(account['cash']):,.2f}")
-                print(f"  Portfolio Value: ${float(account['portfolio_value']):,.2f}")
+                print(f"{self.log_prefix} ✓ Connected to Alpaca Paper Trading")
+                print(f"{self.log_prefix}   Account Status: {account['status']}")
+                print(f"{self.log_prefix}   Buying Power: ${float(account['buying_power']):,.2f}")
+                print(f"{self.log_prefix}   Cash: ${float(account['cash']):,.2f}")
+                print(f"{self.log_prefix}   Portfolio Value: ${float(account['portfolio_value']):,.2f}")
                 return True
             else:
-                print(f"✗ Connection failed: {response.status_code}")
-                print(f"  {response.text}")
+                print(f"{self.log_prefix} ✗ Connection failed: {response.status_code}")
+                print(f"{self.log_prefix}   {response.text}")
                 return False
 
         except Exception as e:
-            print(f"✗ Connection error: {e}")
+            print(f"{self.log_prefix} ✗ Connection error: {e}")
             return False
 
     def get_account(self):
@@ -205,14 +301,16 @@ class AlpacaPaperTrader:
             print(f"Error getting bars: {e}")
             return {}
 
-    def detect_mean_reversion(self, symbol: str, bars: List[Dict]) -> Optional[Dict]:
+    def detect_signal(self, symbol: str, bars: List[Dict]) -> Optional[Dict]:
         """
-        Detect mean reversion opportunities using RSI and Bollinger Bands.
+        Detect trading opportunities using configured detector.
 
         Returns:
             Dict with setup details if opportunity detected, None otherwise
         """
-        if len(bars) < max(self.bb_period, 14) + 5:  # Need enough data for indicators
+        # Need enough data for indicators (use safe minimum)
+        min_bars = 50
+        if len(bars) < min_bars:
             return None
 
         # Convert to DataFrame
@@ -230,11 +328,11 @@ class AlpacaPaperTrader:
             'v': 'volume'
         })
 
-        # Detect setups using mean reversion detector
+        # Detect setups using configured detector
         try:
-            setups = self.mean_reversion.detect_setups(df)
+            setups = self.detector.detect_setups(df)
         except Exception as e:
-            print(f"  Error detecting mean reversion for {symbol}: {e}")
+            print(f"{self.log_prefix}   Error detecting signal for {symbol}: {e}")
             return None
 
         if not setups:
@@ -243,22 +341,31 @@ class AlpacaPaperTrader:
         # Get most recent setup
         latest_setup = setups[-1]
 
-        # Only trade LONG positions for now (buying oversold)
+        # Only trade LONG positions for now
         if latest_setup['direction'] != 'LONG':
             return None
 
-        return {
+        # Build result dict with common fields
+        result = {
             'symbol': symbol,
             'timestamp': latest_setup['timestamp'],
             'direction': 'LONG',
             'entry_price': latest_setup['entry_price'],
             'target_price': latest_setup['target'],
             'stop_loss': latest_setup['stop_loss'],
-            'rsi': latest_setup['rsi'],
-            'bb_distance_pct': latest_setup['bb_distance_pct'],
-            'volume_ratio': latest_setup['volume_ratio'],
-            'strategy': 'Mean Reversion'
+            'volume_ratio': latest_setup.get('volume_ratio', 0),
+            'strategy': self.strategy_name
         }
+
+        # Add detector-specific fields
+        if self.primary_detector == 'MeanReversionDetector':
+            result['rsi'] = latest_setup.get('rsi', 0)
+            result['bb_distance_pct'] = latest_setup.get('bb_distance_pct', 0)
+        elif self.primary_detector == 'VolatilityBreakoutDetector':
+            result['range_size_pct'] = latest_setup.get('range_size_pct', 0)
+            result['consolidation_duration'] = latest_setup.get('consolidation_duration', 0)
+
+        return result
 
     def place_order(
         self,
@@ -329,36 +436,31 @@ class AlpacaPaperTrader:
             return None
 
     def enter_position(self, event: Dict):
-        """Enter a position based on momentum event."""
+        """Enter a position based on trading signal."""
         symbol = event['symbol']
         direction = event['direction']
         entry_price = event['entry_price']
 
         # Skip if already in position
         if symbol in self.active_positions:
-            print(f"⚠ Already in position for {symbol}, skipping")
+            print(f"{self.log_prefix} ⚠ Already in position for {symbol}, skipping")
             return
 
         # Calculate position size (number of shares)
         qty = int(self.position_size / entry_price)
 
         if qty < 1:
-            print(f"⚠ Position size too small for {symbol}")
+            print(f"{self.log_prefix} ⚠ Position size too small for {symbol}")
             return
 
         # Calculate stop loss and take profit
-        if direction == "UP":
-            side = "buy"
-            stop_loss = entry_price * (1 - self.stop_loss_pct / 100)
-            take_profit = entry_price * (1 + self.take_profit_pct / 100)
-        else:
-            side = "sell"  # Short position
-            stop_loss = entry_price * (1 + self.stop_loss_pct / 100)
-            take_profit = entry_price * (1 - self.take_profit_pct / 100)
+        side = "buy"  # LONG only for now
+        stop_loss = event.get('stop_loss', entry_price * (1 - self.stop_loss_pct / 100))
+        take_profit = event.get('target_price', entry_price * (1 + self.stop_loss_pct * 2 / 100))
 
-        print(f"\n🔔 MOMENTUM SIGNAL: {symbol} {direction}")
-        print(f"   Entry: ${entry_price:.2f}")
-        print(f"   Size: {qty} shares (${qty * entry_price:,.0f})")
+        print(f"\n{self.log_prefix} 🔔 {self.strategy_name} SIGNAL: {symbol} {direction}")
+        print(f"{self.log_prefix}    Entry: ${entry_price:.2f}")
+        print(f"{self.log_prefix}    Size: {qty} shares (${qty * entry_price:,.0f})")
 
         # Place order
         order = self.place_order(
@@ -432,10 +534,10 @@ class AlpacaPaperTrader:
 
                 duration_minutes = (exit_time - pos['entry_time']).seconds // 60
 
-                print(f"\n✓ Position CLOSED: {symbol}")
-                print(f"   Entry: ${pos['entry_price']:.2f}")
-                print(f"   Direction: {pos['direction']}")
-                print(f"   Duration: {duration_minutes} minutes")
+                print(f"\n{self.log_prefix} ✓ Position CLOSED: {symbol}")
+                print(f"{self.log_prefix}    Entry: ${pos['entry_price']:.2f}")
+                print(f"{self.log_prefix}    Direction: {pos['direction']}")
+                print(f"{self.log_prefix}    Duration: {duration_minutes} minutes")
 
                 trade_data = {
                     'symbol': symbol,
@@ -493,9 +595,9 @@ class AlpacaPaperTrader:
                 )
                 session.add(trading_session)
                 session.commit()
-                print(f"✓ Session {self.session_id[:8]} created in database")
+                print(f"{self.log_prefix} ✓ Session {self.session_id[:8]} created in database")
         except Exception as e:
-            print(f"⚠ Warning: Failed to create session record: {e}")
+            print(f"{self.log_prefix} ⚠ Warning: Failed to create session record: {e}")
 
     def _save_position(self, symbol: str, position_data: Dict):
         """Save new position to database."""
@@ -520,7 +622,7 @@ class AlpacaPaperTrader:
                 session.add(position)
                 session.commit()
         except Exception as e:
-            print(f"⚠ Warning: Failed to save position {symbol}: {e}")
+            print(f"{self.log_prefix} ⚠ Warning: Failed to save position {symbol}: {e}")
 
     def _update_position_closed(self, symbol: str, position_data: Dict):
         """Update position as closed in database."""
@@ -543,7 +645,7 @@ class AlpacaPaperTrader:
                     position.exit_reason = 'unknown'
                     session.commit()
         except Exception as e:
-            print(f"⚠ Warning: Failed to update position {symbol}: {e}")
+            print(f"{self.log_prefix} ⚠ Warning: Failed to update position {symbol}: {e}")
 
     def _save_checkpoint(self):
         """Save periodic checkpoint of current state."""
@@ -593,10 +695,10 @@ class AlpacaPaperTrader:
                 session.commit()
 
             self.last_checkpoint_time = now
-            print(f"   💾 Checkpoint saved: {len(self.active_positions)} active positions")
+            print(f"{self.log_prefix}    💾 Checkpoint saved: {len(self.active_positions)} active positions")
 
         except Exception as e:
-            print(f"⚠ Warning: Failed to save checkpoint: {e}")
+            print(f"{self.log_prefix} ⚠ Warning: Failed to save checkpoint: {e}")
 
     def _finalize_session(self, final_value: float, pnl: float):
         """Mark session as completed in database."""
@@ -618,9 +720,9 @@ class AlpacaPaperTrader:
                         trading_session.pnl_pct = Decimal(str(pnl / float(trading_session.initial_portfolio_value) * 100))
                     trading_session.total_trades = len(self.closed_trades)
                     session.commit()
-                    print(f"✓ Session {self.session_id[:8]} finalized in database")
+                    print(f"{self.log_prefix} ✓ Session {self.session_id[:8]} finalized in database")
         except Exception as e:
-            print(f"⚠ Warning: Failed to finalize session: {e}")
+            print(f"{self.log_prefix} ⚠ Warning: Failed to finalize session: {e}")
 
     def _check_for_crashed_sessions(self):
         """Check for crashed sessions and offer recovery."""
@@ -650,65 +752,31 @@ class AlpacaPaperTrader:
             print(f"⚠ Warning: Failed to check for crashed sessions: {e}")
 
     def scan_for_signals(self, symbols: List[str]):
-        """Scan symbols for mean reversion signals with relative strength filtering."""
-        print(f"\n⏰ {datetime.now().strftime('%H:%M:%S')} - Scanning {len(symbols)} symbols...")
+        """Scan symbols for trading signals with optional scanner filtering."""
+        print(f"\n{self.log_prefix} ⏰ {datetime.now().strftime('%H:%M:%S')} - Scanning {len(symbols)} symbols...")
 
         # Get latest bars for all symbols
         all_symbols = symbols.copy()
 
-        # Add SPY as benchmark if not already in list
+        # Add SPY as benchmark if not already in list (for relative strength)
         if 'SPY' not in all_symbols:
             all_symbols.append('SPY')
 
         bars_data = self.get_latest_bars(all_symbols, timeframe='5Min', limit=100)
 
-        # Filter by relative strength if enabled
+        # Apply scanner filtering if configured
         filtered_symbols = symbols.copy()
 
-        if self.use_relative_strength and 'SPY' in bars_data:
-            spy_bars = bars_data['SPY']
+        if self.scanner and self.scanner_type == 'relative_strength':
+            # Use relative strength scanner logic
+            filtered_symbols = self._filter_by_relative_strength(symbols, bars_data)
+        elif self.use_relative_strength and hasattr(self, 'use_relative_strength'):
+            # Legacy relative strength filtering
+            filtered_symbols = self._filter_by_relative_strength(symbols, bars_data)
 
-            if spy_bars and len(spy_bars) >= self.relative_strength_period:
-                # Calculate SPY return
-                spy_return = (spy_bars[-1]['c'] - spy_bars[-self.relative_strength_period]['c']) / spy_bars[-self.relative_strength_period]['c']
-
-                # Calculate relative strength for each stock
-                rs_results = []
-                for symbol in symbols:
-                    if symbol == 'SPY' or symbol not in bars_data:
-                        continue
-
-                    bars = bars_data[symbol]
-                    if not bars or len(bars) < self.relative_strength_period:
-                        continue
-
-                    # Calculate stock return
-                    stock_return = (bars[-1]['c'] - bars[-self.relative_strength_period]['c']) / bars[-self.relative_strength_period]['c']
-
-                    # Relative strength = stock outperformance vs SPY
-                    relative_strength = stock_return - spy_return
-
-                    rs_results.append({
-                        'symbol': symbol,
-                        'relative_strength': relative_strength,
-                        'stock_return': stock_return,
-                        'spy_return': spy_return
-                    })
-
-                # Filter to only stocks with positive relative strength (outperforming SPY)
-                strong_stocks = [r for r in rs_results if r['relative_strength'] > 0]
-                filtered_symbols = [r['symbol'] for r in strong_stocks]
-
-                # Sort by relative strength
-                strong_stocks.sort(key=lambda x: x['relative_strength'], reverse=True)
-
-                # Show filtering results
-                if strong_stocks:
-                    print(f"   ✓ Relative Strength Filter: {len(filtered_symbols)}/{len(symbols)} stocks outperforming SPY")
-                    top_performers = ', '.join(["{symbol}({rs:+.1f}%)".format(symbol=r['symbol'], rs=r['relative_strength']*100) for r in strong_stocks[:5]])
-                    print(f"      Top performers: {top_performers}")
-                else:
-                    print(f"   ⚠ Relative Strength Filter: No stocks outperforming SPY")
+        # If no scanner configured, use all symbols
+        if not filtered_symbols:
+            filtered_symbols = symbols
 
         signals_found = 0
 
@@ -721,18 +789,87 @@ class AlpacaPaperTrader:
             if not bars:
                 continue
 
-            # Check for mean reversion signal
-            event = self.detect_mean_reversion(symbol, bars)
+            # Check for trading signal using configured detector
+            event = self.detect_signal(symbol, bars)
 
             if event:
                 signals_found += 1
-                print(f"   📊 {symbol}: {event['direction']} RSI={event['rsi']:.1f}, BB Distance={event['bb_distance_pct']:.1f}%, Vol={event['volume_ratio']:.1f}x")
+                self._print_signal(event)
 
                 # Enter position
                 self.enter_position(event)
 
         if signals_found == 0:
-            print("   No signals detected")
+            print(f"{self.log_prefix}    No signals detected")
+
+    def _filter_by_relative_strength(self, symbols: List[str], bars_data: Dict) -> List[str]:
+        """Filter symbols by relative strength vs SPY."""
+        if 'SPY' not in bars_data:
+            return symbols
+
+        spy_bars = bars_data['SPY']
+        if not spy_bars or len(spy_bars) < self.relative_strength_period:
+            return symbols
+
+        # Calculate SPY return
+        spy_return = (spy_bars[-1]['c'] - spy_bars[-self.relative_strength_period]['c']) / spy_bars[-self.relative_strength_period]['c']
+
+        # Calculate relative strength for each stock
+        rs_results = []
+        for symbol in symbols:
+            if symbol == 'SPY' or symbol not in bars_data:
+                continue
+
+            bars = bars_data[symbol]
+            if not bars or len(bars) < self.relative_strength_period:
+                continue
+
+            # Calculate stock return
+            stock_return = (bars[-1]['c'] - bars[-self.relative_strength_period]['c']) / bars[-self.relative_strength_period]['c']
+
+            # Relative strength = stock outperformance vs SPY
+            relative_strength = stock_return - spy_return
+
+            rs_results.append({
+                'symbol': symbol,
+                'relative_strength': relative_strength,
+                'stock_return': stock_return,
+                'spy_return': spy_return
+            })
+
+        # Filter to only stocks with positive relative strength (outperforming SPY)
+        strong_stocks = [r for r in rs_results if r['relative_strength'] > 0]
+        filtered_symbols = [r['symbol'] for r in strong_stocks]
+
+        # Sort by relative strength
+        strong_stocks.sort(key=lambda x: x['relative_strength'], reverse=True)
+
+        # Show filtering results
+        if strong_stocks:
+            print(f"{self.log_prefix}    ✓ Relative Strength Filter: {len(filtered_symbols)}/{len(symbols)} stocks outperforming SPY")
+            top_performers = ', '.join(["{symbol}({rs:+.1f}%)".format(symbol=r['symbol'], rs=r['relative_strength']*100) for r in strong_stocks[:5]])
+            print(f"{self.log_prefix}       Top performers: {top_performers}")
+        else:
+            print(f"{self.log_prefix}    ⚠ Relative Strength Filter: No stocks outperforming SPY")
+
+        return filtered_symbols
+
+    def _print_signal(self, event: Dict):
+        """Print signal details based on detector type."""
+        symbol = event['symbol']
+        direction = event['direction']
+        volume_ratio = event.get('volume_ratio', 0)
+
+        if self.primary_detector == 'MeanReversionDetector':
+            rsi = event.get('rsi', 0)
+            bb_dist = event.get('bb_distance_pct', 0)
+            print(f"{self.log_prefix}    📊 {symbol}: {direction} RSI={rsi:.1f}, BB Distance={bb_dist:.1f}%, Vol={volume_ratio:.1f}x")
+        elif self.primary_detector == 'VolatilityBreakoutDetector':
+            range_size = event.get('range_size_pct', 0)
+            consolidation = event.get('consolidation_duration', 0)
+            print(f"{self.log_prefix}    📊 {symbol}: {direction} Range={range_size:.1f}%, Consolidation={consolidation} bars, Vol={volume_ratio:.1f}x")
+        else:
+            print(f"{self.log_prefix}    📊 {symbol}: {direction} Vol={volume_ratio:.1f}x")
 
     def run_paper_trading(
         self,
@@ -755,23 +892,29 @@ class AlpacaPaperTrader:
             self._check_for_crashed_sessions()
 
         print("\n" + "=" * 80)
-        print("ALPACA PAPER TRADING - LIVE SESSION")
+        print(f"{self.log_prefix} ALPACA PAPER TRADING - LIVE SESSION")
         print("=" * 80)
-        print(f"Session ID: {self.session_id[:8]}")
-        print(f"Symbols: {', '.join(symbols)}")
-        print(f"Duration: {'Continuous' if duration_minutes == 0 else f'{duration_minutes} minutes'}")
-        print(f"Scan Interval: {scan_interval_seconds} seconds")
-        print(f"Strategy: Mean Reversion + Relative Strength (RSI<{self.rsi_oversold}, BB {self.bb_std}σ, {self.stop_loss_pct}% stop, RS vs SPY)")
+        print(f"{self.log_prefix} Session ID: {self.session_id[:8]}")
+        print(f"{self.log_prefix} Instance ID: {self.instance_id}")
+        print(f"{self.log_prefix} Symbols: {', '.join(symbols)}")
+        print(f"{self.log_prefix} Duration: {'Continuous' if duration_minutes == 0 else f'{duration_minutes} minutes'}")
+        print(f"{self.log_prefix} Scan Interval: {scan_interval_seconds} seconds")
+        print(f"{self.log_prefix} Strategy: {self.strategy_name}")
+        print(f"{self.log_prefix} Detector: {self.primary_detector}")
+        if self.scanner_type:
+            print(f"{self.log_prefix} Scanner: {self.scanner_type}")
+        print(f"{self.log_prefix} Position Size: ${self.position_size:,}")
+        print(f"{self.log_prefix} Stop Loss: {self.stop_loss_pct}%")
         if self.enable_persistence:
-            print(f"State Persistence: ✓ Enabled (checkpoints every {self.checkpoint_interval}s)")
+            print(f"{self.log_prefix} State Persistence: ✓ Enabled (checkpoints every {self.checkpoint_interval}s)")
         else:
-            print(f"State Persistence: ✗ Disabled")
+            print(f"{self.log_prefix} State Persistence: ✗ Disabled")
         print("=" * 80 + "\n")
 
         # Check initial account status
         account = self.get_account()
         initial_value = float(account['portfolio_value'])
-        print(f"Starting Portfolio Value: ${initial_value:,.2f}\n")
+        print(f"{self.log_prefix} Starting Portfolio Value: ${initial_value:,.2f}\n")
 
         # Create session record
         if self.enable_persistence:
@@ -800,37 +943,37 @@ class AlpacaPaperTrader:
                 # Status update
                 if end_time:
                     remaining = int((end_time - datetime.now()).seconds / 60)
-                    print(f"   Active positions: {len(self.active_positions)}, Closed trades: {len(self.closed_trades)}, Time remaining: {remaining} min")
+                    print(f"{self.log_prefix}    Active positions: {len(self.active_positions)}, Closed trades: {len(self.closed_trades)}, Time remaining: {remaining} min")
                 else:
                     runtime = int((datetime.now() - start_time).total_seconds() / 60)
-                    print(f"   Active positions: {len(self.active_positions)}, Closed trades: {len(self.closed_trades)}, Runtime: {runtime} min")
+                    print(f"{self.log_prefix}    Active positions: {len(self.active_positions)}, Closed trades: {len(self.closed_trades)}, Runtime: {runtime} min")
 
                 # Wait before next scan
                 time.sleep(scan_interval_seconds)
 
         except KeyboardInterrupt:
-            print("\n\n⚠ Interrupted by user")
+            print(f"\n\n{self.log_prefix} ⚠ Interrupted by user")
 
         # Final report
         print("\n" + "=" * 80)
-        print("SESSION COMPLETE")
+        print(f"{self.log_prefix} SESSION COMPLETE")
         print("=" * 80)
 
         account = self.get_account()
         final_value = float(account['portfolio_value'])
         pnl = final_value - initial_value
 
-        print(f"\nInitial Portfolio Value: ${initial_value:,.2f}")
-        print(f"Final Portfolio Value:   ${final_value:,.2f}")
-        print(f"P&L:                     ${pnl:,.2f} ({pnl/initial_value*100:+.2f}%)")
-        print(f"\nTotal Closed Trades: {len(self.closed_trades)}")
-        print(f"Active Positions:    {len(self.active_positions)}")
+        print(f"\n{self.log_prefix} Initial Portfolio Value: ${initial_value:,.2f}")
+        print(f"{self.log_prefix} Final Portfolio Value:   ${final_value:,.2f}")
+        print(f"{self.log_prefix} P&L:                     ${pnl:,.2f} ({pnl/initial_value*100:+.2f}%)")
+        print(f"\n{self.log_prefix} Total Closed Trades: {len(self.closed_trades)}")
+        print(f"{self.log_prefix} Active Positions:    {len(self.active_positions)}")
 
         if self.closed_trades:
-            print("\nClosed Trades:")
+            print(f"\n{self.log_prefix} Closed Trades:")
             for trade in self.closed_trades:
                 duration = (trade['exit_time'] - trade['entry_time']).seconds // 60
-                print(f"  {trade['symbol']}: {trade['direction']}, {duration} min")
+                print(f"{self.log_prefix}   {trade['symbol']}: {trade['direction']}, {duration} min")
 
         # Finalize session in database
         if self.enable_persistence:
@@ -839,16 +982,29 @@ class AlpacaPaperTrader:
         print("\n" + "=" * 80 + "\n")
 
 
+def load_config_file(config_path: str) -> Dict:
+    """Load configuration from YAML file."""
+    try:
+        with open(config_path, 'r') as f:
+            return yaml.safe_load(f)
+    except Exception as e:
+        print(f"ERROR: Failed to load config file: {e}")
+        sys.exit(1)
+
+
 def main():
     # Load environment variables from .env file
     load_dotenv()
 
-    parser = argparse.ArgumentParser(description="Alpaca Paper Trading")
+    parser = argparse.ArgumentParser(description="Alpaca Paper Trading - Multi-Instance Support")
     parser.add_argument("--api-key", help="Alpaca API Key (or set ALPACA_API_KEY env var)")
     parser.add_argument("--api-secret", help="Alpaca API Secret (or set ALPACA_API_SECRET env var)")
-    parser.add_argument("--symbols", default="AAPL,MSFT,GOOGL,TSLA,NVDA", help="Symbols to trade")
+    parser.add_argument("--instance-id", type=int, default=1, help="Instance ID (1-5) for multi-instance tracking")
+    parser.add_argument("--strategy", type=str, help="Strategy name from config.yaml (e.g., 'mean-reversion-rs')")
+    parser.add_argument("--config", type=str, default="config.yaml", help="Path to config.yaml file")
+    parser.add_argument("--symbols", help="Symbols to trade (comma-separated, overrides config)")
     parser.add_argument("--duration", type=int, default=60, help="Duration in minutes (0 for continuous)")
-    parser.add_argument("--interval", type=int, default=60, help="Scan interval in seconds")
+    parser.add_argument("--interval", type=int, help="Scan interval in seconds (overrides config)")
     parser.add_argument("--continuous", action="store_true", help="Run continuously (same as --duration 0)")
 
     args = parser.parse_args()
@@ -869,28 +1025,82 @@ def main():
         print("   https://alpaca.markets (sign up for paper trading)")
         return
 
-    # Parse symbols
-    symbols = [s.strip().upper() for s in args.symbols.split(",")]
+    # Load configuration if strategy or instance_id specified
+    config_dict = None
+    symbols = None
+    scan_interval = args.interval or 60
+
+    if args.strategy or args.instance_id > 1:
+        # Load config.yaml
+        full_config = load_config_file(args.config)
+
+        # Determine which strategy to use
+        if args.strategy:
+            # Use specified strategy
+            strategy_name = args.strategy
+            if strategy_name not in full_config.get('trading_strategies', {}):
+                print(f"ERROR: Strategy '{strategy_name}' not found in config.yaml")
+                print(f"Available strategies: {', '.join(full_config.get('trading_strategies', {}).keys())}")
+                return
+            config_dict = full_config['trading_strategies'][strategy_name]
+        else:
+            # Use instance configuration
+            instance_id = args.instance_id
+            if instance_id not in full_config.get('trading_instances', {}):
+                print(f"ERROR: Instance ID {instance_id} not found in config.yaml")
+                print(f"Available instances: {', '.join(map(str, full_config.get('trading_instances', {}).keys()))}")
+                return
+
+            instance_config = full_config['trading_instances'][instance_id]
+            strategy_name = instance_config['strategy']
+
+            if strategy_name not in full_config.get('trading_strategies', {}):
+                print(f"ERROR: Strategy '{strategy_name}' not found in config.yaml")
+                return
+
+            config_dict = full_config['trading_strategies'][strategy_name]
+
+            # Get symbols and interval from instance config
+            if not args.symbols:
+                symbols = instance_config.get('symbols', [])
+            if not args.interval:
+                scan_interval = instance_config.get('interval_seconds', 60)
+
+            print(f"[INST-{instance_id}] Loading instance configuration:")
+            print(f"[INST-{instance_id}]   Name: {instance_config.get('name')}")
+            print(f"[INST-{instance_id}]   Strategy: {strategy_name}")
+            print(f"[INST-{instance_id}]   Description: {instance_config.get('description')}")
+
+    # Parse symbols (command line overrides config)
+    if args.symbols:
+        symbols = [s.strip().upper() for s in args.symbols.split(",")]
+    elif symbols is None:
+        symbols = ['AAPL', 'MSFT', 'GOOGL', 'TSLA', 'NVDA']
 
     # Determine duration (0 or --continuous means run indefinitely)
     duration_minutes = 0 if args.continuous else args.duration
 
     # Create trader
-    trader = AlpacaPaperTrader(api_key, api_secret)
+    trader = AlpacaPaperTrader(
+        api_key=api_key,
+        api_secret=api_secret,
+        instance_id=args.instance_id,
+        config_dict=config_dict,
+    )
 
     # Test connection
     if not trader.check_connection():
-        print("\nFailed to connect to Alpaca. Please check your API credentials.")
+        print(f"\n[INST-{args.instance_id}] Failed to connect to Alpaca. Please check your API credentials.")
         return
 
-    print("\n✓ Ready to start paper trading!\n")
+    print(f"\n[INST-{args.instance_id}] ✓ Ready to start paper trading!\n")
     # input("Press ENTER to begin...")  # Commented out for automated runs
 
     # Run paper trading
     trader.run_paper_trading(
         symbols=symbols,
         duration_minutes=duration_minutes,
-        scan_interval_seconds=args.interval,
+        scan_interval_seconds=scan_interval,
     )
 
 

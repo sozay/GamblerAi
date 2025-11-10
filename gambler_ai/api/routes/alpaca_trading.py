@@ -34,6 +34,7 @@ SessionLocal = sessionmaker(bind=engine)
 class PositionResponse(BaseModel):
     id: int
     session_id: str
+    instance_id: int
     symbol: str
     entry_time: datetime
     exit_time: Optional[datetime]
@@ -58,6 +59,9 @@ class PositionResponse(BaseModel):
 class SessionResponse(BaseModel):
     id: int
     session_id: str
+    instance_id: int
+    strategy_name: Optional[str]
+    allocated_capital: Optional[float]
     start_time: datetime
     end_time: Optional[datetime]
     status: str
@@ -126,6 +130,28 @@ class OrderResponse(BaseModel):
         from_attributes = True
 
 
+class InstanceResponse(BaseModel):
+    instance_id: int
+    name: str
+    strategy: Optional[str]
+    status: str
+    current_pnl: float
+    active_positions: int
+    total_trades: int
+    win_rate: float
+
+
+class ComparisonResponse(BaseModel):
+    instance_id: int
+    name: str
+    strategy: Optional[str]
+    win_rate: float
+    avg_pnl: float
+    total_trades: int
+    total_pnl: float
+    sharpe_ratio: Optional[float]
+
+
 def decimal_to_float(value):
     """Convert Decimal to float, handle None."""
     if value is None:
@@ -137,6 +163,7 @@ def decimal_to_float(value):
 async def get_sessions(
     limit: int = Query(10, ge=1, le=100),
     status: Optional[str] = Query(None, regex="^(active|completed|crashed)$"),
+    instance_id: Optional[int] = Query(None),
 ):
     """Get recent trading sessions."""
     db = SessionLocal()
@@ -146,12 +173,18 @@ async def get_sessions(
         if status:
             query = query.filter(TradingSession.status == status)
 
+        if instance_id is not None:
+            query = query.filter(TradingSession.instance_id == instance_id)
+
         sessions = query.limit(limit).all()
 
         return [
             SessionResponse(
                 id=s.id,
                 session_id=s.session_id,
+                instance_id=s.instance_id,
+                strategy_name=s.strategy_name,
+                allocated_capital=decimal_to_float(s.allocated_capital),
                 start_time=s.start_time,
                 end_time=s.end_time,
                 status=s.status,
@@ -186,6 +219,9 @@ async def get_session(session_id: str):
         return SessionResponse(
             id=session.id,
             session_id=session.session_id,
+            instance_id=session.instance_id,
+            strategy_name=session.strategy_name,
+            allocated_capital=decimal_to_float(session.allocated_capital),
             start_time=session.start_time,
             end_time=session.end_time,
             status=session.status,
@@ -202,21 +238,26 @@ async def get_session(session_id: str):
 
 
 @router.get("/positions/active", response_model=List[PositionResponse])
-async def get_active_positions():
+async def get_active_positions(instance_id: Optional[int] = Query(None)):
     """Get all active positions."""
     db = SessionLocal()
     try:
-        positions = (
+        query = (
             db.query(Position)
+            .join(TradingSession, Position.session_id == TradingSession.session_id)
             .filter(Position.status == "active")
-            .order_by(desc(Position.entry_time))
-            .all()
         )
+
+        if instance_id is not None:
+            query = query.filter(TradingSession.instance_id == instance_id)
+
+        positions = query.order_by(desc(Position.entry_time)).all()
 
         return [
             PositionResponse(
                 id=p.id,
                 session_id=p.session_id,
+                instance_id=p.session.instance_id,
                 symbol=p.symbol,
                 entry_time=p.entry_time,
                 exit_time=p.exit_time,
@@ -241,22 +282,29 @@ async def get_active_positions():
 
 
 @router.get("/positions/closed", response_model=List[PositionResponse])
-async def get_closed_positions(limit: int = Query(20, ge=1, le=100)):
+async def get_closed_positions(
+    limit: int = Query(20, ge=1, le=100),
+    instance_id: Optional[int] = Query(None)
+):
     """Get recently closed positions."""
     db = SessionLocal()
     try:
-        positions = (
+        query = (
             db.query(Position)
+            .join(TradingSession, Position.session_id == TradingSession.session_id)
             .filter(Position.status == "closed")
-            .order_by(desc(Position.exit_time))
-            .limit(limit)
-            .all()
         )
+
+        if instance_id is not None:
+            query = query.filter(TradingSession.instance_id == instance_id)
+
+        positions = query.order_by(desc(Position.exit_time)).limit(limit).all()
 
         return [
             PositionResponse(
                 id=p.id,
                 session_id=p.session_id,
+                instance_id=p.session.instance_id,
                 symbol=p.symbol,
                 entry_time=p.entry_time,
                 exit_time=p.exit_time,
@@ -321,36 +369,34 @@ async def get_recent_trades(
 
 
 @router.get("/stats", response_model=StatsResponse)
-async def get_stats():
+async def get_stats(instance_id: Optional[int] = Query(None)):
     """Get overall trading statistics."""
     db = SessionLocal()
     try:
-        # Total sessions
-        total_sessions = db.query(func.count(TradingSession.id)).scalar() or 0
-        active_sessions = (
-            db.query(func.count(TradingSession.id))
-            .filter(TradingSession.status == "active")
-            .scalar()
-            or 0
-        )
+        # Base queries
+        session_query = db.query(func.count(TradingSession.id))
+        if instance_id is not None:
+            session_query = session_query.filter(TradingSession.instance_id == instance_id)
 
-        # Position counts
-        open_positions = (
-            db.query(func.count(Position.id))
-            .filter(Position.status == "active")
-            .scalar()
-            or 0
-        )
-        closed_positions = (
-            db.query(func.count(Position.id))
-            .filter(Position.status == "closed")
-            .scalar()
-            or 0
-        )
+        total_sessions = session_query.scalar() or 0
+
+        active_session_query = db.query(func.count(TradingSession.id)).filter(TradingSession.status == "active")
+        if instance_id is not None:
+            active_session_query = active_session_query.filter(TradingSession.instance_id == instance_id)
+
+        active_sessions = active_session_query.scalar() or 0
+
+        # Position counts with instance filter
+        position_query_base = db.query(Position).join(TradingSession, Position.session_id == TradingSession.session_id)
+        if instance_id is not None:
+            position_query_base = position_query_base.filter(TradingSession.instance_id == instance_id)
+
+        open_positions = position_query_base.filter(Position.status == "active").count() or 0
+        closed_positions = position_query_base.filter(Position.status == "closed").count() or 0
         total_trades = open_positions + closed_positions
 
         # P&L stats from closed positions
-        pnl_stats = (
+        pnl_query = (
             db.query(
                 func.sum(Position.pnl).label("total_pnl"),
                 func.avg(Position.pnl).label("avg_pnl"),
@@ -358,9 +404,14 @@ async def get_stats():
                 func.min(Position.pnl).label("worst_trade"),
                 func.count(Position.id).label("trade_count"),
             )
+            .join(TradingSession, Position.session_id == TradingSession.session_id)
             .filter(Position.status == "closed", Position.pnl.isnot(None))
-            .first()
         )
+
+        if instance_id is not None:
+            pnl_query = pnl_query.filter(TradingSession.instance_id == instance_id)
+
+        pnl_stats = pnl_query.first()
 
         total_pnl = decimal_to_float(pnl_stats.total_pnl) or 0.0
         avg_pnl = decimal_to_float(pnl_stats.avg_pnl) or 0.0
@@ -368,12 +419,16 @@ async def get_stats():
         worst_trade = decimal_to_float(pnl_stats.worst_trade)
 
         # Win rate
-        winning_trades = (
+        winning_query = (
             db.query(func.count(Position.id))
+            .join(TradingSession, Position.session_id == TradingSession.session_id)
             .filter(Position.status == "closed", Position.pnl > 0)
-            .scalar()
-            or 0
         )
+
+        if instance_id is not None:
+            winning_query = winning_query.filter(TradingSession.instance_id == instance_id)
+
+        winning_trades = winning_query.scalar() or 0
         win_rate = (
             (winning_trades / pnl_stats.trade_count * 100)
             if pnl_stats.trade_count
@@ -425,5 +480,177 @@ async def get_recent_orders(limit: int = Query(20, ge=1, le=100)):
             )
             for o in orders
         ]
+    finally:
+        db.close()
+
+
+@router.get("/instances", response_model=List[InstanceResponse])
+async def get_instances():
+    """Get all instances with their current status."""
+    db = SessionLocal()
+    try:
+        # Get unique instance IDs from sessions
+        instances = db.query(TradingSession.instance_id).distinct().all()
+
+        results = []
+        for (instance_id,) in instances:
+            # Get most recent session for this instance
+            latest_session = (
+                db.query(TradingSession)
+                .filter(TradingSession.instance_id == instance_id)
+                .order_by(desc(TradingSession.start_time))
+                .first()
+            )
+
+            # Get active positions count
+            active_positions = (
+                db.query(func.count(Position.id))
+                .join(TradingSession, Position.session_id == TradingSession.session_id)
+                .filter(
+                    TradingSession.instance_id == instance_id,
+                    Position.status == "active"
+                )
+                .scalar() or 0
+            )
+
+            # Get total trades count
+            total_trades = (
+                db.query(func.count(Position.id))
+                .join(TradingSession, Position.session_id == TradingSession.session_id)
+                .filter(TradingSession.instance_id == instance_id)
+                .scalar() or 0
+            )
+
+            # Get current P&L (sum of all closed positions)
+            current_pnl_query = (
+                db.query(func.sum(Position.pnl))
+                .join(TradingSession, Position.session_id == TradingSession.session_id)
+                .filter(
+                    TradingSession.instance_id == instance_id,
+                    Position.status == "closed",
+                    Position.pnl.isnot(None)
+                )
+                .scalar()
+            )
+            current_pnl = decimal_to_float(current_pnl_query) or 0.0
+
+            # Get win rate
+            closed_trades = (
+                db.query(func.count(Position.id))
+                .join(TradingSession, Position.session_id == TradingSession.session_id)
+                .filter(
+                    TradingSession.instance_id == instance_id,
+                    Position.status == "closed"
+                )
+                .scalar() or 0
+            )
+
+            winning_trades = (
+                db.query(func.count(Position.id))
+                .join(TradingSession, Position.session_id == TradingSession.session_id)
+                .filter(
+                    TradingSession.instance_id == instance_id,
+                    Position.status == "closed",
+                    Position.pnl > 0
+                )
+                .scalar() or 0
+            )
+
+            win_rate = (winning_trades / closed_trades * 100) if closed_trades > 0 else 0.0
+
+            # Determine status
+            status = latest_session.status if latest_session else "unknown"
+            strategy = latest_session.strategy_name if latest_session else "Unknown"
+
+            results.append(
+                InstanceResponse(
+                    instance_id=instance_id,
+                    name=f"Instance {instance_id}",
+                    strategy=strategy,
+                    status=status,
+                    current_pnl=current_pnl,
+                    active_positions=active_positions,
+                    total_trades=total_trades,
+                    win_rate=round(win_rate, 2),
+                )
+            )
+
+        return sorted(results, key=lambda x: x.instance_id)
+    finally:
+        db.close()
+
+
+@router.get("/comparison", response_model=List[ComparisonResponse])
+async def get_comparison():
+    """Get comparison data for all instances."""
+    db = SessionLocal()
+    try:
+        # Get unique instance IDs from sessions
+        instances = db.query(TradingSession.instance_id).distinct().all()
+
+        results = []
+        for (instance_id,) in instances:
+            # Get most recent session for strategy name
+            latest_session = (
+                db.query(TradingSession)
+                .filter(TradingSession.instance_id == instance_id)
+                .order_by(desc(TradingSession.start_time))
+                .first()
+            )
+
+            strategy = latest_session.strategy_name if latest_session else "Unknown"
+
+            # Get statistics for closed positions
+            stats = (
+                db.query(
+                    func.sum(Position.pnl).label("total_pnl"),
+                    func.avg(Position.pnl).label("avg_pnl"),
+                    func.count(Position.id).label("total_trades"),
+                )
+                .join(TradingSession, Position.session_id == TradingSession.session_id)
+                .filter(
+                    TradingSession.instance_id == instance_id,
+                    Position.status == "closed",
+                    Position.pnl.isnot(None)
+                )
+                .first()
+            )
+
+            total_pnl = decimal_to_float(stats.total_pnl) or 0.0
+            avg_pnl = decimal_to_float(stats.avg_pnl) or 0.0
+            total_trades = stats.total_trades or 0
+
+            # Get win rate
+            winning_trades = (
+                db.query(func.count(Position.id))
+                .join(TradingSession, Position.session_id == TradingSession.session_id)
+                .filter(
+                    TradingSession.instance_id == instance_id,
+                    Position.status == "closed",
+                    Position.pnl > 0
+                )
+                .scalar() or 0
+            )
+
+            win_rate = (winning_trades / total_trades * 100) if total_trades > 0 else 0.0
+
+            # Sharpe ratio calculation (simplified - would need more data for accurate calculation)
+            # For now, we'll set it to None as we don't have daily returns data
+            sharpe_ratio = None
+
+            results.append(
+                ComparisonResponse(
+                    instance_id=instance_id,
+                    name=f"Instance {instance_id}",
+                    strategy=strategy,
+                    win_rate=round(win_rate, 2),
+                    avg_pnl=avg_pnl,
+                    total_trades=total_trades,
+                    total_pnl=total_pnl,
+                    sharpe_ratio=sharpe_ratio,
+                )
+            )
+
+        return sorted(results, key=lambda x: x.instance_id)
     finally:
         db.close()

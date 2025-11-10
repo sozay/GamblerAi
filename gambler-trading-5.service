@@ -1,0 +1,20 @@
+[Unit]
+Description=GamblerAI Trading Bot - Instance 5 (Best Setup + Volatility Breakout)
+After=network.target
+
+[Service]
+Type=simple
+User=ozay
+WorkingDirectory=/home/ozay/GamblerAi
+Environment="PATH=/home/ozay/GamblerAi/venv/bin"
+ExecStart=/home/ozay/GamblerAi/venv/bin/python scripts/alpaca_paper_trading.py \
+  --continuous \
+  --instance-id 5 \
+  --config config.yaml
+Restart=always
+RestartSec=15
+StandardOutput=append:/home/ozay/GamblerAi/logs/trading-5.log
+StandardError=append:/home/ozay/GamblerAi/logs/trading-5.error.log
+
+[Install]
+WantedBy=multi-user.target
