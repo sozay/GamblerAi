@@ -37,6 +37,7 @@ from gambler_ai.storage import (
 from gambler_ai.utils.transaction_logger import TransactionLogger
 from gambler_ai.analysis.mean_reversion_detector import MeanReversionDetector
 from gambler_ai.analysis.indicators import calculate_bollinger_bands, calculate_rsi
+from gambler_ai.analysis.stock_scanner import StockScanner, ScannerType
 
 
 class AlpacaPaperTrader:
@@ -71,8 +72,8 @@ class AlpacaPaperTrader:
             'accept': 'application/json',
         }
 
-        # Mean Reversion Strategy parameters
-        self.strategy_name = "Mean Reversion"
+        # Mean Reversion + Relative Strength Strategy parameters
+        self.strategy_name = "Mean Reversion + Relative Strength"
         self.bb_period = 20
         self.bb_std = 2.5
         self.rsi_oversold = 30
@@ -80,6 +81,10 @@ class AlpacaPaperTrader:
         self.stop_loss_pct = 1.0  # Tighter stop for mean reversion
         self.target_bb_middle = True  # Target middle BB band
         self.position_size = 10000  # $10k per trade
+
+        # Relative Strength parameters
+        self.relative_strength_period = 20  # 20-bar lookback for RS calculation
+        self.use_relative_strength = True  # Filter stocks by relative strength vs SPY
 
         # Initialize mean reversion detector
         self.mean_reversion = MeanReversionDetector(
@@ -645,15 +650,69 @@ class AlpacaPaperTrader:
             print(f"⚠ Warning: Failed to check for crashed sessions: {e}")
 
     def scan_for_signals(self, symbols: List[str]):
-        """Scan symbols for momentum signals."""
+        """Scan symbols for mean reversion signals with relative strength filtering."""
         print(f"\n⏰ {datetime.now().strftime('%H:%M:%S')} - Scanning {len(symbols)} symbols...")
 
         # Get latest bars for all symbols
-        bars_data = self.get_latest_bars(symbols, timeframe='5Min', limit=100)
+        all_symbols = symbols.copy()
+
+        # Add SPY as benchmark if not already in list
+        if 'SPY' not in all_symbols:
+            all_symbols.append('SPY')
+
+        bars_data = self.get_latest_bars(all_symbols, timeframe='5Min', limit=100)
+
+        # Filter by relative strength if enabled
+        filtered_symbols = symbols.copy()
+
+        if self.use_relative_strength and 'SPY' in bars_data:
+            spy_bars = bars_data['SPY']
+
+            if spy_bars and len(spy_bars) >= self.relative_strength_period:
+                # Calculate SPY return
+                spy_return = (spy_bars[-1]['c'] - spy_bars[-self.relative_strength_period]['c']) / spy_bars[-self.relative_strength_period]['c']
+
+                # Calculate relative strength for each stock
+                rs_results = []
+                for symbol in symbols:
+                    if symbol == 'SPY' or symbol not in bars_data:
+                        continue
+
+                    bars = bars_data[symbol]
+                    if not bars or len(bars) < self.relative_strength_period:
+                        continue
+
+                    # Calculate stock return
+                    stock_return = (bars[-1]['c'] - bars[-self.relative_strength_period]['c']) / bars[-self.relative_strength_period]['c']
+
+                    # Relative strength = stock outperformance vs SPY
+                    relative_strength = stock_return - spy_return
+
+                    rs_results.append({
+                        'symbol': symbol,
+                        'relative_strength': relative_strength,
+                        'stock_return': stock_return,
+                        'spy_return': spy_return
+                    })
+
+                # Filter to only stocks with positive relative strength (outperforming SPY)
+                strong_stocks = [r for r in rs_results if r['relative_strength'] > 0]
+                filtered_symbols = [r['symbol'] for r in strong_stocks]
+
+                # Sort by relative strength
+                strong_stocks.sort(key=lambda x: x['relative_strength'], reverse=True)
+
+                # Show filtering results
+                if strong_stocks:
+                    print(f"   ✓ Relative Strength Filter: {len(filtered_symbols)}/{len(symbols)} stocks outperforming SPY")
+                    top_performers = ', '.join(["{symbol}({rs:+.1f}%)".format(symbol=r['symbol'], rs=r['relative_strength']*100) for r in strong_stocks[:5]])
+                    print(f"      Top performers: {top_performers}")
+                else:
+                    print(f"   ⚠ Relative Strength Filter: No stocks outperforming SPY")
 
         signals_found = 0
 
-        for symbol in symbols:
+        for symbol in filtered_symbols:
             if symbol not in bars_data:
                 continue
 
@@ -702,7 +761,7 @@ class AlpacaPaperTrader:
         print(f"Symbols: {', '.join(symbols)}")
         print(f"Duration: {'Continuous' if duration_minutes == 0 else f'{duration_minutes} minutes'}")
         print(f"Scan Interval: {scan_interval_seconds} seconds")
-        print(f"Strategy: Mean Reversion (RSI<{self.rsi_oversold}, BB {self.bb_std}σ, {self.stop_loss_pct}% stop)")
+        print(f"Strategy: Mean Reversion + Relative Strength (RSI<{self.rsi_oversold}, BB {self.bb_std}σ, {self.stop_loss_pct}% stop, RS vs SPY)")
         if self.enable_persistence:
             print(f"State Persistence: ✓ Enabled (checkpoints every {self.checkpoint_interval}s)")
         else:
