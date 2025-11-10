@@ -330,7 +330,8 @@
     </div>
 
     <script>
-        const API_BASE = 'http://localhost:9090/api/v1/alpaca';
+        // Use current hostname instead of hardcoded localhost
+        const API_BASE = `${window.location.protocol}//${window.location.host}/api/v1/alpaca`;
         let autoRefreshInterval;
 
         // Format currency
