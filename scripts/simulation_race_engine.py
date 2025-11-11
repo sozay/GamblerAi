@@ -73,6 +73,14 @@ class SimulationRaceEngine:
         initial_capital: float = 100000.0,
         lookback_days: int = 365,
         results_dir: str = "simulation_results",
+        # Execution slippage parameters
+        slippage_enabled: bool = True,
+        slippage_probability: float = 0.3,
+        slippage_delay_bars: int = 1,
+        # Configurable profit/loss targets
+        stop_loss_pct: float = 1.0,
+        take_profit_pct: float = 2.0,
+        use_percentage_targets: bool = True,
     ):
         """
         Initialize simulation race engine.
@@ -82,6 +90,12 @@ class SimulationRaceEngine:
             initial_capital: Starting capital for each combination
             lookback_days: Days to look back (default: 365 = 1 year)
             results_dir: Directory to save results
+            slippage_enabled: Enable execution slippage simulation
+            slippage_probability: Probability of delayed execution (0.0-1.0)
+            slippage_delay_bars: Number of bars to delay execution
+            stop_loss_pct: Stop loss percentage (e.g., 1.0 = 1%)
+            take_profit_pct: Take profit percentage (e.g., 2.0 = 2%)
+            use_percentage_targets: Use percentage-based targets
         """
         self.symbols = symbols or [
             'AAPL', 'MSFT', 'GOOGL', 'TSLA', 'NVDA',
@@ -91,6 +105,14 @@ class SimulationRaceEngine:
         self.lookback_days = lookback_days
         self.results_dir = Path(results_dir)
         self.results_dir.mkdir(exist_ok=True)
+
+        # Store slippage and target configuration
+        self.slippage_enabled = slippage_enabled
+        self.slippage_probability = slippage_probability
+        self.slippage_delay_bars = slippage_delay_bars
+        self.stop_loss_pct = stop_loss_pct
+        self.take_profit_pct = take_profit_pct
+        self.use_percentage_targets = use_percentage_targets
 
         # Define all scanners to test
         self.scanner_types = [
@@ -127,6 +149,8 @@ class SimulationRaceEngine:
         logger.info(f"Strategies: {len(self.strategy_classes)}")
         logger.info(f"Total combinations: {len(self.scanner_types) * len(self.strategy_classes)}")
         logger.info(f"Weeks to simulate: {len(self.weekly_periods)}")
+        logger.info(f"Slippage: enabled={self.slippage_enabled}, probability={self.slippage_probability*100}%, delay={self.slippage_delay_bars} bars")
+        logger.info(f"Targets: stop_loss={self.stop_loss_pct}%, take_profit={self.take_profit_pct}%")
 
     def _generate_weekly_periods(self) -> List[Tuple[datetime, datetime]]:
         """Generate list of weekly periods to simulate."""
@@ -435,6 +459,14 @@ class SimulationRaceEngine:
             'initial_capital': self.initial_capital,
             'symbols': self.symbols,
             'total_weeks': len(self.weekly_periods),
+            'simulation_parameters': {
+                'slippage_enabled': self.slippage_enabled,
+                'slippage_probability': self.slippage_probability,
+                'slippage_delay_bars': self.slippage_delay_bars,
+                'stop_loss_pct': self.stop_loss_pct,
+                'take_profit_pct': self.take_profit_pct,
+                'use_percentage_targets': self.use_percentage_targets,
+            },
             'combinations': {}
         }
 
