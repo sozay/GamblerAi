@@ -5,6 +5,7 @@ Main backtesting engine for strategy simulation.
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 import pandas as pd
+import random
 
 from gambler_ai.backtesting.trade import Trade, TradeDirection, TradeManager
 from gambler_ai.backtesting.performance import PerformanceMetrics
@@ -24,6 +25,14 @@ class BacktestEngine:
         risk_per_trade: float = 0.01,
         max_concurrent_trades: int = 3,
         commission: float = 0.0,  # Commission per trade ($ or %)
+        # Execution slippage parameters
+        slippage_enabled: bool = True,
+        slippage_probability: float = 0.3,  # 30% of time
+        slippage_delay_bars: int = 1,
+        # Configurable profit/loss targets
+        stop_loss_pct: float = 1.0,
+        take_profit_pct: float = 2.0,
+        use_percentage_targets: bool = True,
     ):
         """
         Initialize backtest engine.
@@ -33,11 +42,27 @@ class BacktestEngine:
             risk_per_trade: Risk per trade (fraction of capital)
             max_concurrent_trades: Maximum concurrent open trades
             commission: Commission per trade
+            slippage_enabled: Enable execution slippage simulation
+            slippage_probability: Probability of delayed execution (0.0-1.0)
+            slippage_delay_bars: Number of bars to delay execution
+            stop_loss_pct: Stop loss percentage (e.g., 1.0 = 1%)
+            take_profit_pct: Take profit percentage (e.g., 2.0 = 2%)
+            use_percentage_targets: Use percentage-based targets
         """
         self.initial_capital = initial_capital
         self.risk_per_trade = risk_per_trade
         self.max_concurrent_trades = max_concurrent_trades
         self.commission = commission
+
+        # Slippage configuration
+        self.slippage_enabled = slippage_enabled
+        self.slippage_probability = slippage_probability
+        self.slippage_delay_bars = slippage_delay_bars
+
+        # Profit/Loss target configuration
+        self.stop_loss_pct = stop_loss_pct
+        self.take_profit_pct = take_profit_pct
+        self.use_percentage_targets = use_percentage_targets
 
         self.trade_manager = None
         self.current_capital = initial_capital
@@ -135,10 +160,11 @@ class BacktestEngine:
 
         Entry Logic:
         - Enter at the END of the momentum event (after initial move detected)
+        - With slippage: XX% of time, entry is delayed by N bars
 
         Exit Logic:
-        - Target: Based on continuation prediction (or default 1.5x initial move)
-        - Stop: 1% below entry for LONG, 1% above for SHORT
+        - Target: Configurable % gain (e.g., 2%)
+        - Stop: Configurable % loss (e.g., 1%)
         - Time stop: Exit if no target hit within 60 minutes
         """
         # Check if we can open a trade
@@ -146,17 +172,48 @@ class BacktestEngine:
             return
 
         # Entry parameters
-        entry_time = event["end_time"]
-        entry_price = event["peak_price"]
+        initial_entry_time = event["end_time"]
+        initial_entry_price = event["peak_price"]
         direction = TradeDirection.LONG if event["direction"] == "UP" else TradeDirection.SHORT
 
-        # Calculate stop loss (1% from entry)
-        if direction == TradeDirection.LONG:
-            stop_loss = entry_price * 0.99
-            target = entry_price * (1 + (event["max_move_percentage"] * 1.5) / 100)
+        # Simulate execution slippage
+        entry_time = initial_entry_time
+        entry_price = initial_entry_price
+        slippage_applied = False
+
+        if self.slippage_enabled and random.random() < self.slippage_probability:
+            # Execution delayed - get price at next bar(s)
+            slippage_applied = True
+            delayed_time = initial_entry_time + timedelta(minutes=self.slippage_delay_bars * 5)  # Assuming 5min bars
+            delayed_prices = self._get_price_data_range(
+                symbol, initial_entry_time, delayed_time, timeframe
+            )
+
+            if not delayed_prices.empty and len(delayed_prices) >= self.slippage_delay_bars:
+                delayed_bar = delayed_prices.iloc[self.slippage_delay_bars - 1]
+                entry_time = delayed_bar["timestamp"]
+                entry_price = delayed_bar["close"]
+                logger.debug(
+                    f"Slippage applied: Entry delayed from {initial_entry_time} to {entry_time}, "
+                    f"price changed from ${initial_entry_price:.2f} to ${entry_price:.2f}"
+                )
+
+        # Calculate stop loss and target using configurable percentages
+        if self.use_percentage_targets:
+            if direction == TradeDirection.LONG:
+                stop_loss = entry_price * (1 - self.stop_loss_pct / 100)
+                target = entry_price * (1 + self.take_profit_pct / 100)
+            else:
+                stop_loss = entry_price * (1 + self.stop_loss_pct / 100)
+                target = entry_price * (1 - self.take_profit_pct / 100)
         else:
-            stop_loss = entry_price * 1.01
-            target = entry_price * (1 - (event["max_move_percentage"] * 1.5) / 100)
+            # Fallback to old logic
+            if direction == TradeDirection.LONG:
+                stop_loss = entry_price * 0.99
+                target = entry_price * (1 + (event["max_move_percentage"] * 1.5) / 100)
+            else:
+                stop_loss = entry_price * 1.01
+                target = entry_price * (1 - (event["max_move_percentage"] * 1.5) / 100)
 
         # Open trade
         trade = self.trade_manager.open_trade(
@@ -396,22 +453,52 @@ class BacktestEngine:
             if not self.trade_manager.can_open_trade(self.max_concurrent_trades):
                 continue
 
-            entry_time = setup.get('entry_time') or setup.get('timestamp')
-            entry_price = setup['entry_price']
+            initial_entry_time = setup.get('entry_time') or setup.get('timestamp')
+            initial_entry_price = setup['entry_price']
             direction = TradeDirection.LONG if setup['direction'] == 'LONG' else TradeDirection.SHORT
 
+            # Simulate execution slippage
+            entry_time = initial_entry_time
+            entry_price = initial_entry_price
+
+            if self.slippage_enabled and random.random() < self.slippage_probability:
+                # Find entry index in dataframe
+                entry_idx = df[df['timestamp'] == initial_entry_time].index
+                if len(entry_idx) > 0:
+                    entry_idx = entry_idx[0]
+                    # Get price at delayed bar
+                    delayed_idx = min(entry_idx + self.slippage_delay_bars, len(df) - 1)
+                    if delayed_idx > entry_idx:
+                        delayed_bar = df.iloc[delayed_idx]
+                        entry_time = delayed_bar['timestamp']
+                        entry_price = delayed_bar['close']
+                        logger.debug(
+                            f"Slippage applied: Entry delayed by {self.slippage_delay_bars} bar(s), "
+                            f"price changed from ${initial_entry_price:.2f} to ${entry_price:.2f}"
+                        )
+
             # Get or calculate stop loss and target
-            if 'stop_loss' in setup and 'target' in setup:
+            if 'stop_loss' in setup and 'target' in setup and not self.use_percentage_targets:
+                # Use provided values if not using percentage targets
                 stop_loss = setup['stop_loss']
                 target = setup['target']
             else:
-                # Default risk/reward if not provided
-                if direction == TradeDirection.LONG:
-                    stop_loss = entry_price * 0.99  # 1% stop
-                    target = entry_price * 1.03  # 3% target
+                # Use configurable percentage targets
+                if self.use_percentage_targets:
+                    if direction == TradeDirection.LONG:
+                        stop_loss = entry_price * (1 - self.stop_loss_pct / 100)
+                        target = entry_price * (1 + self.take_profit_pct / 100)
+                    else:
+                        stop_loss = entry_price * (1 + self.stop_loss_pct / 100)
+                        target = entry_price * (1 - self.take_profit_pct / 100)
                 else:
-                    stop_loss = entry_price * 1.01  # 1% stop
-                    target = entry_price * 0.97  # 3% target
+                    # Default risk/reward if not provided
+                    if direction == TradeDirection.LONG:
+                        stop_loss = entry_price * 0.99  # 1% stop
+                        target = entry_price * 1.03  # 3% target
+                    else:
+                        stop_loss = entry_price * 1.01  # 1% stop
+                        target = entry_price * 0.97  # 3% target
 
             # Open trade
             trade = self.trade_manager.open_trade(
