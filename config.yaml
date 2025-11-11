@@ -78,6 +78,22 @@ backtest:
   position_size: 10000              # Position size in dollars
   max_holding_minutes: 120          # Maximum trade duration in minutes
 
+  # Execution slippage simulation
+  execution_slippage:
+    enabled: true                   # Enable/disable slippage simulation
+    probability: 0.3                # % of time order executes at next bar (0.3 = 30%)
+    delay_bars: 1                   # How many bars to delay execution (1 = next bar)
+
+  # Configurable profit/loss targets (can be overridden per trade)
+  profit_loss_targets:
+    use_percentage_targets: true    # Use % targets instead of fixed prices
+    stop_loss_pct: 1.0              # Stop loss % (e.g., 1.0 = 1% loss)
+    take_profit_pct: 2.0            # Take profit % (e.g., 2.0 = 2% gain)
+    trailing_stop:
+      enabled: false                # Enable trailing stop
+      activation_pct: 1.0           # Activate after 1% profit
+      trail_pct: 0.5                # Trail by 0.5%
+
 # Stock universe
 stocks:
   # Initial list of stocks to analyze

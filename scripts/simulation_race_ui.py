@@ -123,6 +123,22 @@ class SimulationRaceUI:
         st.sidebar.metric("Total Weeks", self.data['total_weeks'])
         st.sidebar.metric("Combinations", len(self.data['combinations']))
 
+        # Display simulation parameters if available
+        if 'simulation_parameters' in self.data:
+            st.sidebar.markdown("### Simulation Parameters")
+            params = self.data['simulation_parameters']
+
+            st.sidebar.markdown("**Execution Slippage:**")
+            slippage_status = "✅ Enabled" if params.get('slippage_enabled', False) else "❌ Disabled"
+            st.sidebar.text(f"{slippage_status}")
+            if params.get('slippage_enabled', False):
+                st.sidebar.text(f"Probability: {params.get('slippage_probability', 0)*100:.0f}%")
+                st.sidebar.text(f"Delay: {params.get('slippage_delay_bars', 1)} bar(s)")
+
+            st.sidebar.markdown("**Profit/Loss Targets:**")
+            st.sidebar.text(f"Stop Loss: {params.get('stop_loss_pct', 1.0):.1f}%")
+            st.sidebar.text(f"Take Profit: {params.get('take_profit_pct', 2.0):.1f}%")
+
         st.sidebar.markdown("---")
 
         # Filters
