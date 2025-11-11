@@ -12,6 +12,7 @@ from typing import Dict, List, Tuple, Optional
 from pathlib import Path
 import logging
 import json
+import random
 
 from scripts.data_downloader import DataDownloader
 from gambler_ai.analysis.stock_scanner import StockScanner, ScannerType
@@ -39,6 +40,14 @@ class RealDataSimulator:
         initial_capital: float = 100000.0,
         results_dir: str = "simulation_results_real",
         interval: str = "1h",
+        # Execution slippage parameters
+        slippage_enabled: bool = True,
+        slippage_probability: float = 0.3,
+        slippage_delay_bars: int = 1,
+        # Configurable profit/loss targets
+        stop_loss_pct: float = 1.0,
+        take_profit_pct: float = 2.0,
+        use_percentage_targets: bool = True,
     ):
         """
         Initialize real data simulator.
@@ -50,6 +59,12 @@ class RealDataSimulator:
             initial_capital: Starting capital
             results_dir: Where to save results
             interval: Data interval (1m, 5m, 15m, 1h, 1d)
+            slippage_enabled: Enable execution slippage simulation
+            slippage_probability: Probability of delayed execution (0.0-1.0)
+            slippage_delay_bars: Number of bars to delay execution
+            stop_loss_pct: Stop loss percentage (e.g., 1.0 = 1%)
+            take_profit_pct: Take profit percentage (e.g., 2.0 = 2%)
+            use_percentage_targets: Use percentage-based targets
         """
         self.symbols = symbols
         self.start_date = start_date
@@ -58,6 +73,14 @@ class RealDataSimulator:
         self.interval = interval
         self.results_dir = Path(results_dir)
         self.results_dir.mkdir(exist_ok=True)
+
+        # Store slippage and target configuration
+        self.slippage_enabled = slippage_enabled
+        self.slippage_probability = slippage_probability
+        self.slippage_delay_bars = slippage_delay_bars
+        self.stop_loss_pct = stop_loss_pct
+        self.take_profit_pct = take_profit_pct
+        self.use_percentage_targets = use_percentage_targets
 
         # Scanners and strategies to test
         self.scanner_types = [
@@ -87,6 +110,8 @@ class RealDataSimulator:
         logger.info(f"Symbols: {len(self.symbols)}")
         logger.info(f"Total weeks: {self.total_weeks}")
         logger.info(f"Combinations: {len(self.scanner_types) * len(self.strategy_classes)}")
+        logger.info(f"Slippage: enabled={self.slippage_enabled}, probability={self.slippage_probability*100}%, delay={self.slippage_delay_bars} bars")
+        logger.info(f"Targets: stop_loss={self.stop_loss_pct}%, take_profit={self.take_profit_pct}%")
 
     def _load_market_data(self):
         """Load real market data from cache."""
@@ -367,9 +392,9 @@ class RealDataSimulator:
         # If capital is $100k, trade with $100k. If $10k, trade with $10k.
         position_size = self.initial_capital * 1.0  # Changed from 0.10 to 1.0
 
-        # Risk management parameters (OPTIMIZED)
-        stop_loss_pct = 0.02  # Exit if loss exceeds 2%
-        take_profit_pct = 0.04  # Exit if profit reaches 4%
+        # Risk management parameters - Use configured values
+        stop_loss_pct = self.stop_loss_pct / 100.0  # Convert % to decimal
+        take_profit_pct = self.take_profit_pct / 100.0  # Convert % to decimal
 
         # Simple signal generation based on strategy
         if strategy_name == 'Momentum':
@@ -386,7 +411,13 @@ class RealDataSimulator:
                     data['returns'].iloc[i] > 0.001 and  # 0.1% move (optimized)
                     data['volume'].iloc[i] > data['volume_ma'].iloc[i] * 1.03):  # 3% volume spike (optimized)
 
-                    entry_price = data['close'].iloc[i]
+                    # Apply slippage simulation
+                    entry_idx = i
+                    if self.slippage_enabled and random.random() < self.slippage_probability:
+                        # Slippage occurs - execute at next bar(s)
+                        entry_idx = min(i + self.slippage_delay_bars, len(data) - 1)
+
+                    entry_price = data['close'].iloc[entry_idx]
 
                     # Simulate holding with stop loss and take profit
                     hold_period = min(12, max_hold_bars)  # Optimized: 12 bars
@@ -433,7 +464,13 @@ class RealDataSimulator:
             for i in range(20, len(data) - max_hold_bars, min_bars_between_trades):
                 # OPTIMIZED: More aggressive entry on dips (z-score < -1.0)
                 if data['z_score'].iloc[i] < -1.0:  # Was -1.5
-                    entry_price = data['close'].iloc[i]
+                    # Apply slippage simulation
+                    entry_idx = i
+                    if self.slippage_enabled and random.random() < self.slippage_probability:
+                        # Slippage occurs - execute at next bar(s)
+                        entry_idx = min(i + self.slippage_delay_bars, len(data) - 1)
+
+                    entry_price = data['close'].iloc[entry_idx]
 
                     # Simulate holding with stop loss and take profit
                     hold_period = min(12, max_hold_bars)  # Optimized: 12 bars
@@ -477,7 +514,13 @@ class RealDataSimulator:
             for i in range(20, len(data) - max_hold_bars, min_bars_between_trades):
                 # OPTIMIZED: More sensitive to breakouts (1.5x ATR instead of 2.0x)
                 if data['high_low_range'].iloc[i] > data['atr'].iloc[i] * 1.5:
-                    entry_price = data['close'].iloc[i]
+                    # Apply slippage simulation
+                    entry_idx = i
+                    if self.slippage_enabled and random.random() < self.slippage_probability:
+                        # Slippage occurs - execute at next bar(s)
+                        entry_idx = min(i + self.slippage_delay_bars, len(data) - 1)
+
+                    entry_price = data['close'].iloc[entry_idx]
 
                     # Simulate holding with stop loss and take profit
                     hold_period = min(12, max_hold_bars)  # Optimized: 12 bars

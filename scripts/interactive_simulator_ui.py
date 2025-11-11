@@ -233,6 +233,81 @@ def simulation_config_section():
             step=0.1
         )
 
+    # Execution Slippage Configuration
+    st.markdown("### 🔄 Execution Slippage")
+
+    slippage_enabled = st.checkbox(
+        "Enable Execution Slippage",
+        value=True,
+        help="Simulate real-world order execution delays where XX% of orders execute at the next bar price"
+    )
+
+    col_slip1, col_slip2 = st.columns(2)
+
+    with col_slip1:
+        slippage_probability = st.slider(
+            "Slippage Probability (%)",
+            min_value=0,
+            max_value=100,
+            value=30,
+            step=5,
+            disabled=not slippage_enabled,
+            help="Percentage of orders that will experience delayed execution"
+        ) / 100.0
+
+    with col_slip2:
+        slippage_delay_bars = st.select_slider(
+            "Execution Delay (bars)",
+            options=[1, 2, 3, 4, 5],
+            value=1,
+            disabled=not slippage_enabled,
+            help="Number of bars to delay execution when slippage occurs"
+        )
+
+    if slippage_enabled and slippage_probability > 0:
+        st.info(f"ℹ️ **{slippage_probability * 100:.0f}%** of your orders will execute **{slippage_delay_bars} bar(s) later** than expected")
+
+    # Profit/Loss Targets Configuration
+    st.markdown("### 💰 Profit/Loss Targets")
+
+    use_percentage_targets = st.checkbox(
+        "Use Percentage Targets",
+        value=True,
+        help="Use percentage-based stop loss and take profit instead of fixed prices"
+    )
+
+    col_pl1, col_pl2, col_pl3 = st.columns(3)
+
+    with col_pl1:
+        stop_loss_pct = st.number_input(
+            "Stop Loss (%)",
+            min_value=0.1,
+            max_value=10.0,
+            value=1.0,
+            step=0.1,
+            format="%.1f",
+            help="Percentage loss to close position (e.g., 1.0 = 1% loss)"
+        )
+
+    with col_pl2:
+        take_profit_pct = st.number_input(
+            "Take Profit (%)",
+            min_value=0.1,
+            max_value=20.0,
+            value=2.0,
+            step=0.1,
+            format="%.1f",
+            help="Percentage gain to close position (e.g., 2.0 = 2% gain)"
+        )
+
+    with col_pl3:
+        risk_reward_ratio = take_profit_pct / stop_loss_pct
+        st.metric(
+            "Risk/Reward Ratio",
+            f"1:{risk_reward_ratio:.2f}",
+            help="Higher is better - you're risking $1 to make this much"
+        )
+
     # Return configuration
     return {
         'start_date': datetime.combine(start_date, datetime.min.time()),
@@ -242,7 +317,15 @@ def simulation_config_section():
         'scanners': [scanner_options[s] for s in selected_scanners],
         'strategies': selected_strategies,
         'initial_capital': initial_capital,
-        'update_interval': update_interval
+        'update_interval': update_interval,
+        # Slippage parameters
+        'slippage_enabled': slippage_enabled,
+        'slippage_probability': slippage_probability,
+        'slippage_delay_bars': int(slippage_delay_bars),
+        # Profit/Loss targets
+        'stop_loss_pct': stop_loss_pct,
+        'take_profit_pct': take_profit_pct,
+        'use_percentage_targets': use_percentage_targets,
     }
 
 
@@ -361,7 +444,15 @@ def run_simulation_section(config):
                 end_date=config['end_date'],
                 initial_capital=config['initial_capital'],
                 interval=config['interval'],  # Pass the selected interval!
-                results_dir="simulation_results_real"
+                results_dir="simulation_results_real",
+                # Slippage parameters
+                slippage_enabled=config.get('slippage_enabled', True),
+                slippage_probability=config.get('slippage_probability', 0.3),
+                slippage_delay_bars=config.get('slippage_delay_bars', 1),
+                # Profit/Loss targets
+                stop_loss_pct=config.get('stop_loss_pct', 1.0),
+                take_profit_pct=config.get('take_profit_pct', 2.0),
+                use_percentage_targets=config.get('use_percentage_targets', True),
             )
 
             # Clear any old results first
