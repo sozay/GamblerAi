@@ -146,9 +146,10 @@ trading_strategies:
       volume_multiplier: 3.0
       relative_strength_period: 20
       use_relative_strength: true
+      profit_target_pct: 2.0  # Fixed 2% profit target for 1:2 risk/reward
     position_size: 1000
     stop_loss_pct: 1.0
-    target_bb_middle: true
+    target_bb_middle: false  # Using fixed profit target instead
     max_holding_minutes: 30
 
   gap-mean-reversion:
@@ -161,9 +162,10 @@ trading_strategies:
       rsi_oversold: 35  # Less oversold for gap reversions
       volume_multiplier: 2.5
       min_gap_pct: 0.5  # Minimum gap size
+      profit_target_pct: 2.4  # 2.4% target for 1:2 R/R with 1.2% stop
     position_size: 1000
     stop_loss_pct: 1.2  # Wider stop for gaps
-    target_bb_middle: true
+    target_bb_middle: false  # Using fixed profit target instead
     max_holding_minutes: 45
 
   best-setup-mean-reversion:
@@ -176,9 +178,10 @@ trading_strategies:
       rsi_oversold: 30
       volume_multiplier: 3.0
       min_risk_reward: 2.0  # Only best R/R setups
+      profit_target_pct: 2.0  # Fixed 2% profit target for 1:2 risk/reward
     position_size: 1000
     stop_loss_pct: 1.0
-    target_bb_middle: true
+    target_bb_middle: false  # Using fixed profit target instead
     max_holding_minutes: 30
 
   rs-volatility-breakout:

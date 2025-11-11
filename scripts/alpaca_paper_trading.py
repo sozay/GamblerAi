@@ -95,6 +95,7 @@ class AlpacaPaperTrader:
 
         # State
         self.active_positions = {}
+        self.pending_orders = {}  # Track orders that haven't filled yet
         self.closed_trades = []
         self.scanning_symbols = []
 
@@ -141,6 +142,7 @@ class AlpacaPaperTrader:
             self.volume_multiplier = self.strategy_parameters.get('volume_multiplier', 3.0)
             self.relative_strength_period = self.strategy_parameters.get('relative_strength_period', 20)
             self.use_relative_strength = self.strategy_parameters.get('use_relative_strength', False)
+            self.profit_target_pct = self.strategy_parameters.get('profit_target_pct', 2.0)  # Fixed profit target
         elif self.primary_detector == 'VolatilityBreakoutDetector':
             self.atr_period = self.strategy_parameters.get('atr_period', 14)
             self.atr_compression_ratio = self.strategy_parameters.get('atr_compression_ratio', 0.5)
@@ -161,6 +163,7 @@ class AlpacaPaperTrader:
         self.rsi_oversold = 30
         self.rsi_overbought = 70
         self.stop_loss_pct = 1.0
+        self.profit_target_pct = 2.0  # Fixed 2% profit target
         self.target_bb_middle = True
         self.position_size = 10000
         self.max_holding_minutes = 30
@@ -178,8 +181,10 @@ class AlpacaPaperTrader:
                 rsi_oversold=self.rsi_oversold,
                 rsi_overbought=self.rsi_overbought,
                 volume_multiplier=self.volume_multiplier,
+                profit_target_pct=self.profit_target_pct,
+                stop_loss_pct=self.stop_loss_pct,
             )
-            print(f"{self.log_prefix} ✓ Initialized MeanReversionDetector (BB={self.bb_period}, σ={self.bb_std}, RSI<{self.rsi_oversold})")
+            print(f"{self.log_prefix} ✓ Initialized MeanReversionDetector (BB={self.bb_period}, σ={self.bb_std}, RSI<{self.rsi_oversold}, Target={self.profit_target_pct}%)")
         elif self.primary_detector == 'VolatilityBreakoutDetector':
             self.detector = VolatilityBreakoutDetector(
                 atr_period=self.atr_period,
@@ -266,6 +271,55 @@ class AlpacaPaperTrader:
             return response.json()
         else:
             return []
+
+    def get_order(self, order_id: str):
+        """Get order details by order ID."""
+        try:
+            response = requests.get(
+                f"{self.base_url}/v2/orders/{order_id}",
+                headers=self.headers
+            )
+            if response.status_code == 200:
+                return response.json()
+            else:
+                print(f"{self.log_prefix} ⚠ Failed to get order {order_id}: {response.status_code}")
+                return None
+        except Exception as e:
+            print(f"{self.log_prefix} ⚠ Error getting order {order_id}: {e}")
+            return None
+
+    def is_market_open(self):
+        """Check if market is currently open."""
+        try:
+            response = requests.get(
+                f"{self.base_url}/v2/clock",
+                headers=self.headers
+            )
+            if response.status_code == 200:
+                clock = response.json()
+                return clock.get('is_open', False)
+            else:
+                print(f"{self.log_prefix} ⚠ Failed to get market clock: {response.status_code}")
+                return False
+        except Exception as e:
+            print(f"{self.log_prefix} ⚠ Error checking market hours: {e}")
+            return False
+
+    def cancel_order(self, order_id: str):
+        """Cancel a specific order."""
+        try:
+            response = requests.delete(
+                f"{self.base_url}/v2/orders/{order_id}",
+                headers=self.headers
+            )
+            if response.status_code == 200:
+                return True
+            else:
+                print(f"{self.log_prefix} ⚠ Failed to cancel order {order_id}: {response.status_code}")
+                return False
+        except Exception as e:
+            print(f"{self.log_prefix} ⚠ Error cancelling order {order_id}: {e}")
+            return False
 
     def get_latest_bars(self, symbols: List[str], timeframe: str = "5Min", limit: int = 100):
         """
@@ -441,9 +495,19 @@ class AlpacaPaperTrader:
         direction = event['direction']
         entry_price = event['entry_price']
 
-        # Skip if already in position
+        # Skip if already in position or have pending order
         if symbol in self.active_positions:
             print(f"{self.log_prefix} ⚠ Already in position for {symbol}, skipping")
+            return
+
+        if symbol in self.pending_orders:
+            print(f"{self.log_prefix} ⚠ Pending order exists for {symbol}, skipping")
+            return
+
+        # Check if market is open before placing order
+        if not self.is_market_open():
+            print(f"{self.log_prefix} ⚠ Market is CLOSED - skipping order for {symbol}")
+            print(f"{self.log_prefix}    (Order would be placed outside market hours)")
             return
 
         # Calculate position size (number of shares)
@@ -474,11 +538,11 @@ class AlpacaPaperTrader:
         if order:
             entry_time = datetime.now()
 
-            # Track position
-            position_data = {
+            # Track pending order (not in position yet until filled)
+            order_data = {
                 'symbol': symbol,
                 'entry_time': entry_time,
-                'entry_price': entry_price,
+                'expected_entry_price': entry_price,
                 'qty': qty,
                 'direction': direction,
                 'side': side,
@@ -487,32 +551,94 @@ class AlpacaPaperTrader:
                 'order_id': order['id'],
                 'transaction_id': None,  # Will be set if logging enabled
             }
-            self.active_positions[symbol] = position_data
-
-            # Save to database for crash recovery
-            if self.enable_persistence:
-                self._save_position(symbol, position_data)
-
-            # Log trade entry for audit trail
-            if self.transaction_logger:
-                try:
-                    transaction_id = self.transaction_logger.log_trade_entry(
-                        symbol=symbol,
-                        direction="LONG" if side == "buy" else "SHORT",
-                        entry_time=entry_time,
-                        entry_price=entry_price,
-                        position_size=qty,
-                        stop_loss=stop_loss,
-                        target=take_profit,
-                        strategy_name=f"momentum_{direction.lower()}",
-                        trade_id=order['id'],
-                    )
-                    self.active_positions[symbol]['transaction_id'] = transaction_id
-                except Exception as e:
-                    print(f"Warning: Failed to log trade entry: {e}")
+            self.pending_orders[symbol] = order_data
+            print(f"{self.log_prefix}    Order placed, waiting for fill...")
 
     def check_positions(self):
-        """Check status of active positions."""
+        """Check status of pending orders and active positions."""
+
+        # 0. Auto-cancel stale pending orders (older than 10 minutes)
+        stale_timeout_minutes = 10
+        for symbol in list(self.pending_orders.keys()):
+            order_data = self.pending_orders[symbol]
+            order_age_minutes = (datetime.now() - order_data['entry_time']).total_seconds() / 60
+
+            if order_age_minutes > stale_timeout_minutes:
+                print(f"\n{self.log_prefix} ⚠ Auto-cancelling stale order for {symbol}")
+                print(f"{self.log_prefix}    Order age: {order_age_minutes:.1f} minutes (timeout: {stale_timeout_minutes} min)")
+
+                if self.cancel_order(order_data['order_id']):
+                    print(f"{self.log_prefix}    ✓ Order cancelled successfully")
+                    del self.pending_orders[symbol]
+                else:
+                    print(f"{self.log_prefix}    ✗ Failed to cancel order, will retry next check")
+
+        # 1. Check pending orders to see if they've filled
+        for symbol in list(self.pending_orders.keys()):
+            order_data = self.pending_orders[symbol]
+            order_id = order_data['order_id']
+
+            # Get order status from Alpaca
+            order_info = self.get_order(order_id)
+            if not order_info:
+                continue
+
+            order_status = order_info.get('status')
+
+            if order_status == 'filled':
+                # Order filled! Move to active positions
+                filled_qty = int(order_info.get('filled_qty', order_data['qty']))
+                filled_avg_price = float(order_info.get('filled_avg_price', order_data['expected_entry_price']))
+
+                print(f"\n{self.log_prefix} ✓ Order FILLED: {symbol}")
+                print(f"{self.log_prefix}    Filled Price: ${filled_avg_price:.2f}")
+                print(f"{self.log_prefix}    Quantity: {filled_qty}")
+
+                # Create position entry
+                position_data = {
+                    'symbol': symbol,
+                    'entry_time': order_data['entry_time'],
+                    'entry_price': filled_avg_price,
+                    'qty': filled_qty,
+                    'direction': order_data['direction'],
+                    'side': order_data['side'],
+                    'stop_loss': order_data['stop_loss'],
+                    'take_profit': order_data['take_profit'],
+                    'order_id': order_id,
+                    'transaction_id': None,
+                }
+
+                self.active_positions[symbol] = position_data
+                del self.pending_orders[symbol]
+
+                # Save to database
+                if self.enable_persistence:
+                    self._save_position(symbol, position_data)
+
+                # Log trade entry
+                if self.transaction_logger:
+                    try:
+                        transaction_id = self.transaction_logger.log_trade_entry(
+                            symbol=symbol,
+                            direction="LONG" if position_data['side'] == "buy" else "SHORT",
+                            entry_time=position_data['entry_time'],
+                            entry_price=filled_avg_price,
+                            position_size=filled_qty,
+                            stop_loss=position_data['stop_loss'],
+                            target=position_data['take_profit'],
+                            strategy_name=self.strategy_name,
+                            trade_id=order_id,
+                        )
+                        self.active_positions[symbol]['transaction_id'] = transaction_id
+                    except Exception as e:
+                        print(f"{self.log_prefix} ⚠ Warning: Failed to log trade entry: {e}")
+
+            elif order_status in ['canceled', 'expired', 'rejected']:
+                # Order not filled, remove from pending
+                print(f"\n{self.log_prefix} ⚠ Order {order_status.upper()}: {symbol}")
+                del self.pending_orders[symbol]
+
+        # 2. Check active positions to see if they've closed
         if not self.active_positions:
             return
 
@@ -523,20 +649,46 @@ class AlpacaPaperTrader:
         # Check if any of our tracked positions are closed
         for symbol in list(self.active_positions.keys()):
             if symbol not in position_symbols:
-                # Position closed
+                # Position closed - get actual exit details from order
                 pos = self.active_positions.pop(symbol)
                 exit_time = datetime.now()
 
-                # Get order details to determine exit reason
-                # (would need to query orders endpoint for full details)
-                exit_price = None  # Would get from Alpaca API
-                exit_reason = "closed"
+                # Get exit order details (stop loss or take profit leg of bracket order)
+                order_info = self.get_order(pos['order_id'])
 
-                duration_minutes = (exit_time - pos['entry_time']).seconds // 60
+                exit_price = pos['entry_price']  # Default fallback
+                exit_reason = "unknown"
+
+                if order_info:
+                    # Check bracket order legs for exit details
+                    legs = order_info.get('legs', [])
+                    for leg_id in legs:
+                        leg_info = self.get_order(leg_id)
+                        if leg_info and leg_info.get('status') == 'filled':
+                            exit_price = float(leg_info.get('filled_avg_price', exit_price))
+                            leg_type = leg_info.get('order_class', '')
+                            if 'stop' in leg_type.lower():
+                                exit_reason = "stop_loss"
+                            elif 'limit' in leg_type.lower():
+                                exit_reason = "take_profit"
+                            else:
+                                exit_reason = "bracket_filled"
+                            break
+
+                # Calculate P&L
+                if pos['side'] == 'buy':
+                    pnl = (exit_price - pos['entry_price']) * pos['qty']
+                else:  # sell/short
+                    pnl = (pos['entry_price'] - exit_price) * pos['qty']
+
+                pnl_pct = (pnl / (pos['entry_price'] * pos['qty'])) * 100 if pos['entry_price'] > 0 else 0
+
+                duration_minutes = int((exit_time - pos['entry_time']).seconds / 60)
 
                 print(f"\n{self.log_prefix} ✓ Position CLOSED: {symbol}")
-                print(f"{self.log_prefix}    Entry: ${pos['entry_price']:.2f}")
-                print(f"{self.log_prefix}    Direction: {pos['direction']}")
+                print(f"{self.log_prefix}    Entry: ${pos['entry_price']:.2f} → Exit: ${exit_price:.2f}")
+                print(f"{self.log_prefix}    P&L: ${pnl:.2f} ({pnl_pct:+.2f}%)")
+                print(f"{self.log_prefix}    Reason: {exit_reason}")
                 print(f"{self.log_prefix}    Duration: {duration_minutes} minutes")
 
                 trade_data = {
@@ -544,28 +696,26 @@ class AlpacaPaperTrader:
                     'entry_time': pos['entry_time'],
                     'exit_time': exit_time,
                     'entry_price': pos['entry_price'],
+                    'exit_price': exit_price,
                     'direction': pos['direction'],
                     'qty': pos['qty'],
+                    'pnl': pnl,
+                    'pnl_pct': pnl_pct,
+                    'exit_reason': exit_reason,
                 }
                 self.closed_trades.append(trade_data)
 
-                # Update position in database for crash recovery
+                # Update position in database
                 if self.enable_persistence:
                     self._update_position_closed(symbol, pos)
 
-                # Log trade exit for audit trail
+                # Log trade exit with actual P&L
                 if self.transaction_logger and pos.get('transaction_id'):
                     try:
-                        # Estimate exit price and P&L
-                        # In real implementation, would get from Alpaca API
-                        estimated_exit = pos['entry_price']  # Placeholder
-                        pnl = 0.0  # Would calculate from actual fills
-                        pnl_pct = 0.0
-
                         self.transaction_logger.log_trade_exit(
                             transaction_id=pos['transaction_id'],
                             exit_time=exit_time,
-                            exit_price=estimated_exit,
+                            exit_price=exit_price,
                             exit_reason=exit_reason,
                             pnl=pnl,
                             pnl_pct=pnl_pct,
@@ -575,7 +725,7 @@ class AlpacaPaperTrader:
                             trade_id=pos['order_id'],
                         )
                     except Exception as e:
-                        print(f"Warning: Failed to log trade exit: {e}")
+                        print(f"{self.log_prefix} ⚠ Warning: Failed to log trade exit: {e}")
 
     def _create_session_record(self, symbols: List[str], duration_minutes: int, scan_interval_seconds: int, initial_value: float):
         """Create initial trading session record in database."""
@@ -945,10 +1095,10 @@ class AlpacaPaperTrader:
                 # Status update
                 if end_time:
                     remaining = int((end_time - datetime.now()).seconds / 60)
-                    print(f"{self.log_prefix}    Active positions: {len(self.active_positions)}, Closed trades: {len(self.closed_trades)}, Time remaining: {remaining} min")
+                    print(f"{self.log_prefix}    Pending orders: {len(self.pending_orders)}, Active positions: {len(self.active_positions)}, Closed trades: {len(self.closed_trades)}, Time remaining: {remaining} min")
                 else:
                     runtime = int((datetime.now() - start_time).total_seconds() / 60)
-                    print(f"{self.log_prefix}    Active positions: {len(self.active_positions)}, Closed trades: {len(self.closed_trades)}, Runtime: {runtime} min")
+                    print(f"{self.log_prefix}    Pending orders: {len(self.pending_orders)}, Active positions: {len(self.active_positions)}, Closed trades: {len(self.closed_trades)}, Runtime: {runtime} min")
 
                 # Wait before next scan
                 time.sleep(scan_interval_seconds)
@@ -968,7 +1118,8 @@ class AlpacaPaperTrader:
         print(f"\n{self.log_prefix} Initial Portfolio Value: ${initial_value:,.2f}")
         print(f"{self.log_prefix} Final Portfolio Value:   ${final_value:,.2f}")
         print(f"{self.log_prefix} P&L:                     ${pnl:,.2f} ({pnl/initial_value*100:+.2f}%)")
-        print(f"\n{self.log_prefix} Total Closed Trades: {len(self.closed_trades)}")
+        print(f"\n{self.log_prefix} Pending Orders:      {len(self.pending_orders)}")
+        print(f"{self.log_prefix} Total Closed Trades: {len(self.closed_trades)}")
         print(f"{self.log_prefix} Active Positions:    {len(self.active_positions)}")
 
         if self.closed_trades:
@@ -1008,6 +1159,7 @@ def main():
     parser.add_argument("--duration", type=int, default=60, help="Duration in minutes (0 for continuous)")
     parser.add_argument("--interval", type=int, help="Scan interval in seconds (overrides config)")
     parser.add_argument("--continuous", action="store_true", help="Run continuously (same as --duration 0)")
+    parser.add_argument("--no-persistence", action="store_true", help="Disable database persistence (faster startup, no crash recovery)")
 
     args = parser.parse_args()
 
@@ -1088,6 +1240,7 @@ def main():
         api_secret=api_secret,
         instance_id=args.instance_id,
         config_dict=config_dict,
+        enable_persistence=not args.no_persistence,
     )
 
     # Test connection

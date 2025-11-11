@@ -9,8 +9,9 @@ Entry Logic:
 - Volume spike (>3x average) indicating climax/exhaustion
 
 Exit Logic:
-- Target: Middle Bollinger Band (return to mean)
+- Target: Fixed percentage profit (default 2%)
 - Stop: 1% beyond entry
+- Risk/Reward: 1:2 ratio
 - Time stop: 30 minutes
 """
 
@@ -37,6 +38,8 @@ class MeanReversionDetector:
         rsi_oversold: float = 30,
         rsi_overbought: float = 70,
         volume_multiplier: float = 3.0,
+        profit_target_pct: float = 2.0,
+        stop_loss_pct: float = 1.0,
     ):
         """
         Initialize mean reversion detector.
@@ -48,6 +51,8 @@ class MeanReversionDetector:
             rsi_oversold: RSI oversold threshold
             rsi_overbought: RSI overbought threshold
             volume_multiplier: Volume spike threshold
+            profit_target_pct: Fixed profit target percentage (default 2%)
+            stop_loss_pct: Stop loss percentage (default 1%)
         """
         self.bb_period = bb_period
         self.bb_std = bb_std
@@ -55,6 +60,8 @@ class MeanReversionDetector:
         self.rsi_oversold = rsi_oversold
         self.rsi_overbought = rsi_overbought
         self.volume_multiplier = volume_multiplier
+        self.profit_target_pct = profit_target_pct
+        self.stop_loss_pct = stop_loss_pct
 
     def detect_setups(self, df: pd.DataFrame) -> List[Dict]:
         """
@@ -83,33 +90,35 @@ class MeanReversionDetector:
 
             # Check for LONG setup (oversold)
             if self._is_long_setup(row):
+                entry_price = float(row['close'])
                 setup = {
                     'direction': 'LONG',
                     'timestamp': row.get('timestamp', i),
-                    'entry_price': float(row['close']),
+                    'entry_price': entry_price,
                     'bb_distance_pct': float(
                         (row['bb_middle'] - row['close']) / row['close'] * 100
                     ),
                     'rsi': float(row['rsi']),
                     'volume_ratio': float(row['volume_ratio']),
-                    'target': float(row['bb_middle']),
-                    'stop_loss': float(row['close'] * 0.99),  # 1% below
+                    'target': float(entry_price * (1 + self.profit_target_pct / 100)),
+                    'stop_loss': float(entry_price * (1 - self.stop_loss_pct / 100)),
                 }
                 setups.append(setup)
 
             # Check for SHORT setup (overbought)
             elif self._is_short_setup(row):
+                entry_price = float(row['close'])
                 setup = {
                     'direction': 'SHORT',
                     'timestamp': row.get('timestamp', i),
-                    'entry_price': float(row['close']),
+                    'entry_price': entry_price,
                     'bb_distance_pct': float(
                         (row['close'] - row['bb_middle']) / row['close'] * 100
                     ),
                     'rsi': float(row['rsi']),
                     'volume_ratio': float(row['volume_ratio']),
-                    'target': float(row['bb_middle']),
-                    'stop_loss': float(row['close'] * 1.01),  # 1% above
+                    'target': float(entry_price * (1 - self.profit_target_pct / 100)),
+                    'stop_loss': float(entry_price * (1 + self.stop_loss_pct / 100)),
                 }
                 setups.append(setup)
 
