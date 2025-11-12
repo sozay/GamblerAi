@@ -447,11 +447,27 @@ class RealDataSimulator:
                         best_exit_price = data['close'].iloc[exit_idx]
 
                     pnl = (best_exit_price - entry_price) / entry_price
+
+                    # Extract exit time
+                    exit_time = None
+                    if 'timestamp' in data.columns:
+                        if best_exit_price is not None:
+                            # Find the index where we exited
+                            for j in range(entry_idx + 1, min(entry_idx + hold_period + 1, len(data))):
+                                if abs(data['close'].iloc[j] - best_exit_price) < 0.01:  # Close enough match
+                                    exit_time = data['timestamp'].iloc[j]
+                                    break
+                            if exit_time is None:
+                                exit_time = data['timestamp'].iloc[min(entry_idx + hold_period, len(data) - 1)]
+
                     trades.append({
+                        'entry_time': data['timestamp'].iloc[entry_idx] if 'timestamp' in data.columns else None,
+                        'exit_time': exit_time,
                         'entry_price': entry_price,
                         'exit_price': best_exit_price,
                         'pnl_pct': pnl,
-                        'pnl_dollars': pnl * position_size
+                        'pnl_dollars': pnl * position_size,
+                        'successful': pnl > 0,
                     })
 
         elif strategy_name == 'Mean Reversion':
@@ -497,11 +513,27 @@ class RealDataSimulator:
                         best_exit_price = data['close'].iloc[exit_idx]
 
                     pnl = (best_exit_price - entry_price) / entry_price
+
+                    # Extract exit time
+                    exit_time = None
+                    if 'timestamp' in data.columns:
+                        if best_exit_price is not None:
+                            # Find the index where we exited
+                            for j in range(entry_idx + 1, min(entry_idx + hold_period + 1, len(data))):
+                                if abs(data['close'].iloc[j] - best_exit_price) < 0.01:  # Close enough match
+                                    exit_time = data['timestamp'].iloc[j]
+                                    break
+                            if exit_time is None:
+                                exit_time = data['timestamp'].iloc[min(entry_idx + hold_period, len(data) - 1)]
+
                     trades.append({
+                        'entry_time': data['timestamp'].iloc[entry_idx] if 'timestamp' in data.columns else None,
+                        'exit_time': exit_time,
                         'entry_price': entry_price,
                         'exit_price': best_exit_price,
                         'pnl_pct': pnl,
-                        'pnl_dollars': pnl * position_size
+                        'pnl_dollars': pnl * position_size,
+                        'successful': pnl > 0,
                     })
 
         elif strategy_name == 'Volatility Breakout':
@@ -547,11 +579,27 @@ class RealDataSimulator:
                         best_exit_price = data['close'].iloc[exit_idx]
 
                     pnl = (best_exit_price - entry_price) / entry_price
+
+                    # Extract exit time
+                    exit_time = None
+                    if 'timestamp' in data.columns:
+                        if best_exit_price is not None:
+                            # Find the index where we exited
+                            for j in range(entry_idx + 1, min(entry_idx + hold_period + 1, len(data))):
+                                if abs(data['close'].iloc[j] - best_exit_price) < 0.01:  # Close enough match
+                                    exit_time = data['timestamp'].iloc[j]
+                                    break
+                            if exit_time is None:
+                                exit_time = data['timestamp'].iloc[min(entry_idx + hold_period, len(data) - 1)]
+
                     trades.append({
+                        'entry_time': data['timestamp'].iloc[entry_idx] if 'timestamp' in data.columns else None,
+                        'exit_time': exit_time,
                         'entry_price': entry_price,
                         'exit_price': best_exit_price,
                         'pnl_pct': pnl,
-                        'pnl_dollars': pnl * position_size
+                        'pnl_dollars': pnl * position_size,
+                        'successful': pnl > 0,
                     })
 
         return trades
@@ -591,6 +639,7 @@ class RealDataSimulator:
                 'pnl': 0,
                 'trades_count': 0,
                 'win_rate': 0,
+                'trades': [],
             }
 
         total_pnl = sum(t['pnl_dollars'] for t in all_trades)
@@ -601,6 +650,7 @@ class RealDataSimulator:
             'pnl': total_pnl,
             'trades_count': len(all_trades),
             'win_rate': win_rate,
+            'trades': all_trades,
         }
 
     def run_simulation(self) -> Dict:
@@ -621,6 +671,7 @@ class RealDataSimulator:
                 cumulative_pnl = 0
                 total_trades = 0
                 total_wins = 0
+                all_trades_detail = []  # Store all trade details
 
                 # Simulate each week
                 for week_num, (week_start, week_end) in enumerate(self.weekly_periods, 1):
@@ -630,6 +681,9 @@ class RealDataSimulator:
 
                     cumulative_pnl += week_result['pnl']
                     total_trades += week_result['trades_count']
+
+                    # Collect all trades with details
+                    all_trades_detail.extend(week_result.get('trades', []))
 
                     if week_result['trades_count'] > 0:
                         wins_this_week = int(
@@ -652,6 +706,16 @@ class RealDataSimulator:
                 return_pct = (cumulative_pnl / self.initial_capital) * 100
                 overall_win_rate = (total_wins / total_trades * 100) if total_trades > 0 else 0
 
+                # Convert trade times to ISO format for JSON serialization
+                trades_serializable = []
+                for trade in all_trades_detail:
+                    trade_copy = trade.copy()
+                    if trade_copy.get('entry_time'):
+                        trade_copy['entry_time'] = trade_copy['entry_time'].isoformat()
+                    if trade_copy.get('exit_time'):
+                        trade_copy['exit_time'] = trade_copy['exit_time'].isoformat()
+                    trades_serializable.append(trade_copy)
+
                 all_results[combo_name] = {
                     'scanner': scanner_type.value,
                     'strategy': strategy_name,
@@ -661,6 +725,7 @@ class RealDataSimulator:
                     'win_rate': overall_win_rate,
                     'weekly_pnl': [w['pnl'] for w in weekly_results],
                     'cumulative_pnl': [w['cumulative_pnl'] for w in weekly_results],
+                    'trades': trades_serializable,  # Include all trade details
                 }
 
                 logger.info(f"  Completed: P&L=${cumulative_pnl:,.2f}, Return={return_pct:.2f}%")

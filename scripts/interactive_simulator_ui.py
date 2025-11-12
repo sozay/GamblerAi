@@ -534,7 +534,7 @@ def results_section():
     st.markdown("---")
 
     # Create tabs for results
-    tab1, tab2 = st.tabs(["📈 Performance Chart", "🏆 Rankings"])
+    tab1, tab2, tab3 = st.tabs(["📈 Performance Chart", "🏆 Rankings", "🔔 Exit Time Distribution"])
 
     with tab1:
         # Line chart
@@ -591,6 +591,185 @@ def results_section():
         df.insert(0, 'Rank', range(1, len(df) + 1))
 
         st.dataframe(df, width='stretch', hide_index=True)
+
+    with tab3:
+        # Exit Time Distribution (Bell Curve)
+        st.markdown("### 🔔 Trade Exit Time Distribution")
+        st.markdown("Distribution of trade close times throughout the day - comparing successful vs failed trades")
+
+        # Select combo to analyze
+        combo_options = {
+            f"{combo_data['scanner']} + {combo_data['strategy']}": combo_name
+            for combo_name, combo_data in results['combinations'].items()
+        }
+
+        selected_combo_display = st.selectbox(
+            "Select Strategy Combination",
+            list(combo_options.keys()),
+            key="exit_time_combo"
+        )
+
+        selected_combo = combo_options[selected_combo_display]
+        combo_data = results['combinations'][selected_combo]
+
+        # Check if trades data is available
+        if 'trades' not in combo_data or not combo_data['trades']:
+            st.warning("⚠️ No detailed trade data available for this combination.")
+            st.info("Trade details are only available for simulations run with the updated simulator.")
+        else:
+            trades = combo_data['trades']
+
+            # Parse exit times and separate successful vs failed
+            successful_hours = []
+            failed_hours = []
+
+            for trade in trades:
+                if trade.get('exit_time'):
+                    try:
+                        from datetime import datetime
+                        exit_time = datetime.fromisoformat(trade['exit_time'])
+                        hour = exit_time.hour + exit_time.minute / 60.0  # Convert to decimal hours
+
+                        if trade.get('successful', False):
+                            successful_hours.append(hour)
+                        else:
+                            failed_hours.append(hour)
+                    except:
+                        continue
+
+            if not successful_hours and not failed_hours:
+                st.warning("⚠️ No exit time data found in trades.")
+            else:
+                # Create histogram/bell curve
+                from plotly.subplots import make_subplots
+
+                fig = make_subplots(
+                    rows=2, cols=1,
+                    subplot_titles=("Successful Trades Exit Times", "Failed Trades Exit Times"),
+                    vertical_spacing=0.15
+                )
+
+                # Successful trades histogram
+                if successful_hours:
+                    fig.add_trace(
+                        go.Histogram(
+                            x=successful_hours,
+                            nbinsx=24,  # One bin per hour
+                            name="Successful",
+                            marker_color='#28a745',
+                            opacity=0.7,
+                            histnorm='probability density'  # Normalize to show distribution
+                        ),
+                        row=1, col=1
+                    )
+
+                # Failed trades histogram
+                if failed_hours:
+                    fig.add_trace(
+                        go.Histogram(
+                            x=failed_hours,
+                            nbinsx=24,
+                            name="Failed",
+                            marker_color='#dc3545',
+                            opacity=0.7,
+                            histnorm='probability density'
+                        ),
+                        row=2, col=1
+                    )
+
+                # Update layout
+                fig.update_xaxes(title_text="Hour of Day (24h)", range=[0, 24], row=1, col=1)
+                fig.update_xaxes(title_text="Hour of Day (24h)", range=[0, 24], row=2, col=1)
+                fig.update_yaxes(title_text="Density", row=1, col=1)
+                fig.update_yaxes(title_text="Density", row=2, col=1)
+
+                fig.update_layout(
+                    height=700,
+                    showlegend=False,
+                    title_text=f"Exit Time Distribution: {selected_combo_display}"
+                )
+
+                st.plotly_chart(fig, use_container_width=True)
+
+                # Show statistics
+                col1, col2, col3, col4 = st.columns(4)
+
+                with col1:
+                    st.metric("Total Trades", len(trades))
+
+                with col2:
+                    st.metric("Successful Trades", len(successful_hours))
+
+                with col3:
+                    st.metric("Failed Trades", len(failed_hours))
+
+                with col4:
+                    win_rate = (len(successful_hours) / len(trades) * 100) if trades else 0
+                    st.metric("Win Rate", f"{win_rate:.1f}%")
+
+                # Show peak hours
+                st.markdown("### 📊 Peak Exit Hours")
+
+                col_a, col_b = st.columns(2)
+
+                with col_a:
+                    if successful_hours:
+                        import numpy as np
+                        hist, bins = np.histogram(successful_hours, bins=24, range=(0, 24))
+                        peak_hour = int(bins[np.argmax(hist)])
+                        st.success(f"✅ **Successful trades peak:** {peak_hour}:00 - {peak_hour+1}:00")
+                        st.caption(f"Most successful exits occur around hour {peak_hour}")
+
+                with col_b:
+                    if failed_hours:
+                        hist, bins = np.histogram(failed_hours, bins=24, range=(0, 24))
+                        peak_hour = int(bins[np.argmax(hist)])
+                        st.error(f"❌ **Failed trades peak:** {peak_hour}:00 - {peak_hour+1}:00")
+                        st.caption(f"Most failed exits occur around hour {peak_hour}")
+
+                # Show overlay comparison
+                st.markdown("### 🔄 Overlay Comparison")
+
+                fig_overlay = go.Figure()
+
+                if successful_hours:
+                    fig_overlay.add_trace(go.Histogram(
+                        x=successful_hours,
+                        nbinsx=24,
+                        name="Successful",
+                        marker_color='#28a745',
+                        opacity=0.6,
+                        histnorm='probability density'
+                    ))
+
+                if failed_hours:
+                    fig_overlay.add_trace(go.Histogram(
+                        x=failed_hours,
+                        nbinsx=24,
+                        name="Failed",
+                        marker_color='#dc3545',
+                        opacity=0.6,
+                        histnorm='probability density'
+                    ))
+
+                fig_overlay.update_layout(
+                    title="Successful vs Failed Trades - Exit Time Distribution",
+                    xaxis_title="Hour of Day (24h)",
+                    yaxis_title="Density",
+                    barmode='overlay',
+                    height=400,
+                    xaxis=dict(range=[0, 24])
+                )
+
+                st.plotly_chart(fig_overlay, use_container_width=True)
+
+                st.info("""
+                **How to interpret:**
+                - Bell curves show when trades typically close during the day
+                - Compare successful (green) vs failed (red) distributions
+                - Look for patterns: Do successful trades close at specific times?
+                - Use insights to optimize entry/exit timing strategies
+                """)
 
 
 def main():
