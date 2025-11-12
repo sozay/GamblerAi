@@ -463,11 +463,11 @@ class RealDataSimulator:
                     trades.append({
                         'entry_time': data['timestamp'].iloc[entry_idx] if 'timestamp' in data.columns else None,
                         'exit_time': exit_time,
-                        'entry_price': entry_price,
-                        'exit_price': best_exit_price,
-                        'pnl_pct': pnl,
-                        'pnl_dollars': pnl * position_size,
-                        'successful': pnl > 0,
+                        'entry_price': float(entry_price),
+                        'exit_price': float(best_exit_price),
+                        'pnl_pct': float(pnl),
+                        'pnl_dollars': float(pnl * position_size),
+                        'successful': bool(pnl > 0),
                     })
 
         elif strategy_name == 'Mean Reversion':
@@ -529,11 +529,11 @@ class RealDataSimulator:
                     trades.append({
                         'entry_time': data['timestamp'].iloc[entry_idx] if 'timestamp' in data.columns else None,
                         'exit_time': exit_time,
-                        'entry_price': entry_price,
-                        'exit_price': best_exit_price,
-                        'pnl_pct': pnl,
-                        'pnl_dollars': pnl * position_size,
-                        'successful': pnl > 0,
+                        'entry_price': float(entry_price),
+                        'exit_price': float(best_exit_price),
+                        'pnl_pct': float(pnl),
+                        'pnl_dollars': float(pnl * position_size),
+                        'successful': bool(pnl > 0),
                     })
 
         elif strategy_name == 'Volatility Breakout':
@@ -595,11 +595,11 @@ class RealDataSimulator:
                     trades.append({
                         'entry_time': data['timestamp'].iloc[entry_idx] if 'timestamp' in data.columns else None,
                         'exit_time': exit_time,
-                        'entry_price': entry_price,
-                        'exit_price': best_exit_price,
-                        'pnl_pct': pnl,
-                        'pnl_dollars': pnl * position_size,
-                        'successful': pnl > 0,
+                        'entry_price': float(entry_price),
+                        'exit_price': float(best_exit_price),
+                        'pnl_pct': float(pnl),
+                        'pnl_dollars': float(pnl * position_size),
+                        'successful': bool(pnl > 0),
                     })
 
         return trades
