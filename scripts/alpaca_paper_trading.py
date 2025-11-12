@@ -38,6 +38,7 @@ from gambler_ai.storage import (
 from gambler_ai.utils.transaction_logger import TransactionLogger
 from gambler_ai.analysis.mean_reversion_detector import MeanReversionDetector
 from gambler_ai.analysis.volatility_breakout_detector import VolatilityBreakoutDetector
+from gambler_ai.trading.order_synchronizer import OrderSynchronizer
 from gambler_ai.analysis.indicators import calculate_bollinger_bands, calculate_rsi
 from gambler_ai.analysis.stock_scanner import StockScanner, ScannerType
 
@@ -114,6 +115,11 @@ class AlpacaPaperTrader:
             try:
                 self.db = get_analytics_db()
                 print(f"{self.log_prefix} ✓ Database connection established for state persistence")
+                # Initialize state manager and order synchronizer
+                from gambler_ai.trading.state_manager import StateManager
+                self.state_manager = StateManager(self.db.get_session_direct())
+                self.order_sync = OrderSynchronizer(self.state_manager, self.headers, self.base_url)
+                print(f"{self.log_prefix} ✓ Order synchronizer initialized")
             except Exception as e:
                 print(f"{self.log_prefix} ⚠ Warning: Could not connect to database: {e}")
                 print(f"{self.log_prefix}   State persistence disabled")
@@ -636,6 +642,10 @@ class AlpacaPaperTrader:
             elif order_status in ['canceled', 'expired', 'rejected']:
                 # Order not filled, remove from pending
                 print(f"\n{self.log_prefix} ⚠ Order {order_status.upper()}: {symbol}")
+                # CRITICAL FIX: Update database BEFORE removing from pending
+                if self.enable_persistence and hasattr(self, 'order_sync'):
+                    self.order_sync.sync_order_status(order_id, order_info)
+                    print(f"{self.log_prefix}    Logged to OrderJournal with status: {order_status}")
                 del self.pending_orders[symbol]
 
         # 2. Check active positions to see if they've closed
@@ -661,6 +671,9 @@ class AlpacaPaperTrader:
 
                 if order_info:
                     # Check bracket order legs for exit details
+                    # SYNC EXIT ORDER DETAILS TO DATABASE
+                    if self.enable_persistence and hasattr(self, 'order_sync'):
+                        self.order_sync.sync_closed_positions(pos, order_info)
                     legs = order_info.get('legs', [])
                     for leg_id in legs:
                         leg_info = self.get_order(leg_id)
