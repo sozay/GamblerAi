@@ -1,136 +1,160 @@
-# GamblerAI - Stock Momentum Trading System
+# GamblerAI - AI-Powered Trading System
 
-A Python-based momentum trading system with adaptive strategies, backtesting capabilities, and live paper trading integration.
+An intelligent trading system that combines real-time trading with comprehensive strategy simulation and backtesting capabilities.
 
-## Overview
+## 🎯 Core Functionalities
 
-GamblerAI is a momentum trading system that:
-- Detects momentum patterns across multiple strategies (Mean Reversion, Smart Money, Adaptive)
-- Backtests strategies on historical data
-- Runs live paper trading via Alpaca API
-- Scans multiple stocks for trading opportunities
+### 1. **Live Trading System**
+Real-time paper/live trading integrated with Alpaca API
+- Automated trading with multiple momentum-based strategies
+- Real-time market data analysis and signal detection
+- Position management with stop-loss and take-profit orders
+- State persistence and crash recovery
+- Multi-symbol concurrent trading
 
-## Key Features
+### 2. **Simulation & Backtesting Engine**
+Comprehensive strategy testing and optimization platform
+- Test multiple trading strategies against historical data
+- Scanner strategy comparison (40+ combinations)
+- Interactive race visualization showing strategy performance
+- Week-by-week performance tracking
+- Realistic market simulation with slippage and fees
 
-- **6 Trading Strategies**: Mean Reversion, Smart Money, Volatility Breakout, News Event, Adaptive, Multi-Stock Scanner
-- **Backtesting Engine**: Test strategies on historical data with realistic market conditions
-- **Live Paper Trading**: Alpaca API integration for real-time paper trading
-- **Multi-Stock Scanner**: Scan and trade multiple stocks simultaneously
-- **Regime Detection**: Adapt strategies based on market conditions
-- **Performance Analytics**: Detailed metrics, Sharpe ratio, max drawdown analysis
+### 3. **Interactive Web UI**
+Streamlit-based dashboards for both systems
+- Real-time trading dashboard with live P&L tracking
+- Simulation race interface with animated comparisons
+- Strategy configurator for parameter tuning
+- Performance analytics and visualizations
 
-## Quick Start
+---
 
-See [docs/guides/PAPER_TRADING_SETUP.md](docs/guides/PAPER_TRADING_SETUP.md) for complete setup instructions.
+## 🚀 Quick Start
 
 ### Prerequisites
 
 ```bash
-# Required
-pip install pandas numpy requests pyyaml
+# Install dependencies
+pip install -r requirements.txt
 
-# Sign up for free Alpaca Paper Trading account
-# https://alpaca.markets (get $100k paper money)
-```
-
-### Run Paper Trading
-
-```bash
-# Set API credentials
+# Set up Alpaca API credentials (free paper trading account)
 export ALPACA_API_KEY='your_key'
 export ALPACA_API_SECRET='your_secret'
+```
 
-# Start paper trading (5-minute test)
+### Running Live Trading
+
+```bash
+# Start paper trading (recommended for testing)
 python3 scripts/alpaca_paper_trading.py \
   --symbols AAPL,MSFT,GOOGL \
-  --duration 5 \
+  --duration 60 \
   --interval 30
 ```
 
-That's it! The system will scan for momentum signals and place paper trades automatically.
-
-## Usage
-
-### Paper Trading
+### Running Simulations
 
 ```bash
-# Quick test (5 minutes)
-python3 scripts/alpaca_paper_trading.py --duration 5 --symbols AAPL,MSFT
+# Run simulation race (tests 40+ strategy combinations)
+python3 scripts/simulation_race_engine.py
 
-# Full session (1 hour)
-python3 scripts/alpaca_paper_trading.py --duration 60
-
-# Multiple stocks with custom interval
-python3 scripts/alpaca_paper_trading.py \
-  --symbols AAPL,MSFT,GOOGL,TSLA,NVDA \
-  --duration 30 \
-  --interval 60
+# Launch interactive simulation UI
+streamlit run scripts/simulation_race_ui.py
 ```
 
-### Backtesting
+### Launching Dashboards
 
 ```bash
-# Run backtest on historical data
-python3 scripts/backtest_screening.py
+# Trading dashboard (monitor live trading)
+streamlit run scripts/simulation_live_dashboard.py
 
-# Backtest specific scanner strategies
-python3 backtest_stock_scanners_multi_year.py
+# Strategy configurator (tune parameters)
+streamlit run scripts/simulation_configurator_ui.py
 
-# Debug scanner issues
-python3 debug_scanner_issues.py
+# Interactive simulator
+streamlit run scripts/interactive_simulator_ui.py
 ```
 
-### Utilities
+---
 
-```bash
-# Fetch historical data
-python3 scripts/fetch_alpaca_data.py --symbol AAPL --start 2024-01-01
-
-# Optimize strategy parameters
-python3 scripts/optimize_parameters.py
-
-# Visualize backtest results
-python3 scripts/visualize_backtest.py
-```
-
-## Project Structure
+## 📁 Project Structure
 
 ```
 GamblerAi/
 ├── gambler_ai/                      # Core package
-│   ├── analysis/                    # Trading strategies and detectors
-│   │   ├── momentum_detector.py     # Base momentum detection
-│   │   ├── mean_reversion_detector.py
-│   │   ├── smart_money_detector.py
-│   │   ├── adaptive_strategy.py     # Regime-based adaptation
-│   │   ├── stock_scanner.py         # Multi-stock scanner
-│   │   └── regime_detector.py       # Market regime detection
+│   ├── analysis/                    # Trading strategies & detectors
 │   ├── backtesting/                 # Backtest engine
-│   │   ├── backtest_engine.py       # Main engine
-│   │   ├── performance.py           # Metrics calculation
-│   │   └── trade.py                 # Trade management
-│   ├── data_ingestion/              # Data fetching
+│   ├── trading/                     # Live trading logic
+│   ├── api/                         # API integrations
+│   ├── dashboard/                   # UI components
+│   ├── data_ingestion/              # Market data fetching
+│   ├── storage/                     # Database & persistence
 │   └── utils/                       # Configuration & logging
 ├── scripts/                         # Production scripts
-│   ├── alpaca_paper_trading.py      # Live paper trading
-│   ├── backtest_screening.py        # Main backtest system
-│   ├── fetch_alpaca_data.py         # Data fetching
-│   ├── optimize_parameters.py       # Parameter optimization
-│   └── visualize_backtest.py        # Performance charts
+│   ├── alpaca_paper_trading.py      # Main live trading script
+│   ├── alpaca_paper_trading_recovery.py  # Trading recovery system
+│   ├── simulation_race_engine.py    # Simulation engine
+│   ├── simulation_race_ui.py        # Simulation race UI
+│   ├── simulation_live_dashboard.py # Live trading dashboard
+│   ├── interactive_simulator_ui.py  # Interactive simulator
+│   ├── simulation_configurator_ui.py # Strategy configurator
+│   ├── fetch_alpaca_data.py         # Data fetching utilities
+│   ├── data_downloader.py           # Historical data downloader
+│   └── enhanced_data_downloader.py  # Advanced data fetching
 ├── docs/                            # Documentation
 │   ├── guides/                      # User guides
-│   ├── reference/                   # Technical docs
-│   ├── results/                     # Backtest reports
-│   └── archive/                     # Historical docs
+│   ├── reference/                   # Technical documentation
+│   └── archive/                     # Historical docs & notes
 ├── archive/                         # Archived experiments
-│   └── experimental-backtests/      # Old backtest scripts
+│   └── old-scripts/                 # Deprecated scripts
+├── tests/                           # Test suite
 ├── config.yaml                      # Strategy configuration
+├── docker-compose.yml               # Docker setup
 └── requirements.txt                 # Dependencies
 ```
 
-## Configuration
+---
 
-Edit `config.yaml` to customize strategies:
+## 🎮 Usage Examples
+
+### Live Trading
+
+```bash
+# Quick 5-minute test
+python3 scripts/alpaca_paper_trading.py --duration 5 --symbols AAPL,MSFT
+
+# Full trading session with multiple symbols
+python3 scripts/alpaca_paper_trading.py \
+  --symbols AAPL,MSFT,GOOGL,TSLA,NVDA \
+  --duration 120 \
+  --interval 60
+```
+
+### Simulation & Backtesting
+
+```bash
+# Run full simulation race (52 weeks, 40+ combinations)
+python3 scripts/simulation_race_engine.py
+
+# View results interactively
+streamlit run scripts/simulation_race_ui.py
+```
+
+### Data Management
+
+```bash
+# Fetch historical data from Alpaca
+python3 scripts/fetch_alpaca_data.py --symbol AAPL --start 2024-01-01
+
+# Download extended historical data
+python3 scripts/data_downloader.py
+```
+
+---
+
+## ⚙️ Configuration
+
+Edit `config.yaml` to customize trading strategies:
 
 ```yaml
 strategies:
@@ -152,33 +176,67 @@ stocks:
     - NVDA
 
 alpaca:
-  # Set via environment variables or .env file
   api_key: ${ALPACA_API_KEY}
   api_secret: ${ALPACA_API_SECRET}
   paper_trading: true
 ```
 
-## Trading Strategies
+---
 
-### 1. Mean Reversion
-Detects overbought/oversold conditions and trades the reversal.
+## 📊 Trading Strategies
 
-### 2. Smart Money
-Follows institutional money flows via volume and price action.
+The system implements multiple momentum-based strategies:
 
-### 3. Volatility Breakout
-Captures momentum from volatility expansion.
+1. **Mean Reversion** - Trades overbought/oversold conditions
+2. **Smart Money** - Follows institutional money flows
+3. **Volatility Breakout** - Captures volatility expansion
+4. **Multi-Timeframe** - Analyzes multiple timeframes
+5. **Momentum** - Follows strong directional moves
 
-### 4. News Event
-Trades momentum around scheduled events (earnings, Fed announcements).
+### Stock Scanners
 
-### 5. Adaptive Strategy
-Dynamically selects strategy based on detected market regime (bull/bear/ranging).
+- Top Movers (volume + price action)
+- High Volume spikes
+- Volatility Range filtering
+- Relative Strength vs benchmark
+- Gap Scanner (pre-market/intraday gaps)
+- Best Setups (risk/reward optimization)
+- Sector Leaders
+- Market Cap weighted selection
 
-### 6. Multi-Stock Scanner
-Scans multiple stocks simultaneously for momentum signals across all strategies.
+---
 
-## Development
+## 🐳 Docker Deployment
+
+```bash
+# Start all services
+docker-compose up -d
+
+# View logs
+docker-compose logs -f
+
+# Stop services
+docker-compose down
+```
+
+Services:
+- **gambler-api**: REST API for trading operations
+- **gambler-trading**: Main trading service
+- **postgres**: Database for persistence
+
+---
+
+## 📚 Documentation
+
+- **[Setup Guide](docs/guides/PAPER_TRADING_SETUP.md)** - Complete setup instructions
+- **[Running Instructions](docs/guides/RUNNING_INSTRUCTIONS.md)** - How to run the system
+- **[Troubleshooting](docs/guides/TROUBLESHOOTING.md)** - Common issues and solutions
+- **[Architecture](docs/reference/ARCHITECTURE.md)** - System design details
+- **[Simulation Guide](scripts/README_SIMULATION_RACE.md)** - Simulation system guide
+
+---
+
+## 🧪 Development
 
 ### Running Tests
 
@@ -189,43 +247,71 @@ pytest tests/
 ### Adding New Strategies
 
 1. Create detector in `gambler_ai/analysis/`
-2. Inherit from base `MomentumDetector`
+2. Inherit from `MomentumDetector` base class
 3. Implement `detect_pattern()` method
-4. Add to `stock_scanner.py` strategies list
-5. Test with `scripts/backtest_screening.py`
+4. Register in `stock_scanner.py`
+5. Test with simulation engine
 
-## Documentation
+---
 
-- **[Setup Guide](docs/guides/PAPER_TRADING_SETUP.md)** - Complete setup instructions
-- **[Running Instructions](docs/guides/RUNNING_INSTRUCTIONS.md)** - How to run paper trading
-- **[Troubleshooting](docs/guides/TROUBLESHOOTING.md)** - Common issues and fixes
-- **[Architecture](docs/reference/ARCHITECTURE.md)** - System design details
-- **[Backtest Results](docs/results/FINAL_BACKTEST_RESULTS.md)** - Performance reports
+## 🔧 Service Management
 
-## Current Status
+The project includes systemd service files for production deployment:
+
+```bash
+# Install services
+sudo ./install-services.sh
+
+# Check status
+sudo systemctl status gambler-trading
+sudo systemctl status gambler-api
+
+# View logs
+sudo journalctl -u gambler-trading -f
+```
+
+---
+
+## 📈 Current Status
 
 ✅ **Implemented:**
-- 6 trading strategies with momentum detection
-- Comprehensive backtesting engine
-- Live Alpaca paper trading integration
-- Multi-stock scanner system
-- Regime detection and adaptive strategy selection
+- Real-time Alpaca paper/live trading integration
+- 5+ momentum-based trading strategies
+- 8 stock scanner types
+- Comprehensive simulation and backtesting engine
+- Interactive web dashboards (Streamlit)
+- State persistence and crash recovery
+- Multi-symbol concurrent trading
 - Performance analytics and visualization
 
-📊 **Backtest Performance:**
-- Multi-year backtests completed (2019-2024)
-- Tested across bull, bear, and ranging markets
-- See `docs/results/` for detailed reports
+---
 
-## Support
+## 🛠️ Built With
+
+- **Python 3.11+** - Core language
+- **Alpaca API** - Market data & trading execution
+- **Streamlit** - Interactive web dashboards
+- **PostgreSQL** - State persistence
+- **Docker** - Containerized deployment
+- **Pandas/NumPy** - Data analysis
+
+---
+
+## ⚠️ Disclaimer
+
+This system is for educational and research purposes. Trading involves substantial risk. Always test thoroughly with paper trading before considering live trading. Past performance does not guarantee future results.
+
+---
+
+## 📞 Support
 
 For questions or issues:
-- Review `docs/guides/TROUBLESHOOTING.md`
+- Review documentation in `docs/guides/`
+- Check `docs/guides/TROUBLESHOOTING.md`
 - Open an issue on GitHub
 
-## Built With
+---
 
-- **Data**: Yahoo Finance, Alpaca Markets API
-- **Core**: Python, Pandas, NumPy
-- **Analysis**: Custom momentum detection algorithms
-- **Trading**: Alpaca Paper Trading API
+## 📝 License
+
+See LICENSE file for details.
