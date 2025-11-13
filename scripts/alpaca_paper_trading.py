@@ -294,6 +294,22 @@ class AlpacaPaperTrader:
             print(f"{self.log_prefix} ⚠ Error getting order {order_id}: {e}")
             return None
 
+    def get_current_price(self, symbol: str):
+        """Get current price for a symbol."""
+        try:
+            response = requests.get(
+                f"{self.data_url}/v2/stocks/{symbol}/quotes/latest",
+                headers=self.headers
+            )
+            if response.status_code == 200:
+                data = response.json()
+                # Use ask price for current price
+                return float(data.get('quote', {}).get('ap', 0))
+            return None
+        except Exception as e:
+            print(f"{self.log_prefix} ⚠ Error getting price for {symbol}: {e}")
+            return None
+
     def is_market_open(self):
         """Check if market is currently open."""
         try:
@@ -560,6 +576,114 @@ class AlpacaPaperTrader:
             self.pending_orders[symbol] = order_data
             print(f"{self.log_prefix}    Order placed, waiting for fill...")
 
+    def check_exit_orders_status(self, order_id: str):
+        """
+        Check if a position has active exit orders.
+
+        Args:
+            order_id: The entry order ID (bracket order parent)
+
+        Returns:
+            Tuple of (has_active_exit_orders: bool, exit_order_details: list)
+        """
+        order_info = self.get_order(order_id)
+
+        if not order_info:
+            return False, []
+
+        order_class = order_info.get('order_class', 'simple')
+
+        if order_class not in ['bracket', 'oco', 'oto']:
+            return False, []
+
+        # Check bracket order legs
+        legs = order_info.get('legs', [])
+        active_legs = []
+        expired_or_canceled = []
+
+        for leg_id in legs:
+            leg_info = self.get_order(leg_id)
+            if leg_info:
+                leg_status = leg_info.get('status')
+                if leg_status in ['pending', 'new', 'accepted', 'partially_filled']:
+                    active_legs.append(leg_info)
+                elif leg_status in ['expired', 'canceled', 'rejected']:
+                    expired_or_canceled.append(leg_info)
+
+        return len(active_legs) > 0, {'active': active_legs, 'expired': expired_or_canceled}
+
+    def recreate_exit_orders(self, symbol: str, position_data: dict):
+        """
+        Create new exit orders for a position that lost its exit protection.
+
+        Args:
+            symbol: Stock symbol
+            position_data: Position data dictionary
+
+        Returns:
+            True if exit orders were successfully created
+        """
+        try:
+            current_price = self.get_current_price(symbol)
+            if not current_price:
+                print(f"{self.log_prefix} ⚠ Could not get current price for {symbol}")
+                return False
+
+            # Calculate new exit prices based on current price
+            if position_data['side'] == 'buy':
+                take_profit = current_price * (1 + (self.stop_loss_pct / 100) * 2)  # 2x stop loss for TP
+                stop_loss = current_price * (1 - self.stop_loss_pct / 100)
+            else:
+                take_profit = current_price * (1 - (self.stop_loss_pct / 100) * 2)
+                stop_loss = current_price * (1 + self.stop_loss_pct / 100)
+
+            # Determine exit side
+            exit_side = 'sell' if position_data['side'] == 'buy' else 'buy'
+
+            # Create OCO order (one-cancels-other) with take profit and stop loss
+            order_data = {
+                'symbol': symbol,
+                'qty': position_data['qty'],
+                'side': exit_side,
+                'type': 'limit',
+                'time_in_force': 'gtc',  # Good till canceled
+                'order_class': 'oco',
+                'take_profit': {
+                    'limit_price': round(take_profit, 2)
+                },
+                'stop_loss': {
+                    'stop_price': round(stop_loss, 2),
+                    'limit_price': round(stop_loss * 0.99 if exit_side == 'sell' else stop_loss * 1.01, 2)
+                }
+            }
+
+            response = requests.post(
+                f"{self.base_url}/v2/orders",
+                headers=self.headers,
+                json=order_data
+            )
+
+            if response.status_code in [200, 201]:
+                order_response = response.json()
+                print(f"{self.log_prefix} ✓ Created new exit orders for {symbol}")
+                print(f"{self.log_prefix}    Current: ${current_price:.2f}")
+                print(f"{self.log_prefix}    Take Profit: ${take_profit:.2f}")
+                print(f"{self.log_prefix}    Stop Loss: ${stop_loss:.2f}")
+
+                # Update position data with new exit prices
+                position_data['take_profit'] = take_profit
+                position_data['stop_loss'] = stop_loss
+
+                return True
+            else:
+                print(f"{self.log_prefix} ✗ Failed to create exit orders for {symbol}: {response.status_code}")
+                print(f"{self.log_prefix}    {response.text}")
+                return False
+
+        except Exception as e:
+            print(f"{self.log_prefix} ✗ Error creating exit orders for {symbol}: {e}")
+            return False
+
     def check_positions(self):
         """Check status of pending orders and active positions."""
 
@@ -739,6 +863,28 @@ class AlpacaPaperTrader:
                         )
                     except Exception as e:
                         print(f"{self.log_prefix} ⚠ Warning: Failed to log trade exit: {e}")
+
+        # 3. Check active positions for expired/canceled exit orders
+        for symbol in list(self.active_positions.keys()):
+            pos = self.active_positions[symbol]
+            order_id = pos.get('order_id')
+
+            if not order_id:
+                continue
+
+            # Check if position has active exit orders
+            has_exit_orders, exit_details = self.check_exit_orders_status(order_id)
+
+            if not has_exit_orders and exit_details.get('expired'):
+                # Position has expired/canceled exit orders - needs protection
+                print(f"\n{self.log_prefix} ⚠ Position {symbol} has NO active exit orders!")
+                print(f"{self.log_prefix}    {len(exit_details['expired'])} exit order(s) expired/canceled")
+
+                # Try to recreate exit orders
+                if self.recreate_exit_orders(symbol, pos):
+                    print(f"{self.log_prefix}    ✓ Position {symbol} is now protected")
+                else:
+                    print(f"{self.log_prefix}    ✗ WARNING: Could not protect {symbol} - position at risk!")
 
     def _create_session_record(self, symbols: List[str], duration_minutes: int, scan_interval_seconds: int, initial_value: float):
         """Create initial trading session record in database."""
